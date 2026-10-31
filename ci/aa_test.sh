@@ -90,8 +90,12 @@ if adb shell pm list packages | grep -q gearhead; then
   GHVER=$(adb -s "$SER" shell dumpsys package com.google.android.projection.gearhead 2>/dev/null | grep -m1 versionName | tr -d '\r' | awk -F= '{print $2}')
   # trusted baseline: preinstalled gearhead signing cert digest
   GHPATH=$(adb -s "$SER" shell pm path com.google.android.projection.gearhead 2>/dev/null | head -1 | sed 's/package://' | tr -d '\r')
-  adb -s "$SER" pull "$GHPATH" "$ART/gearhead-preinstalled.apk" >/dev/null 2>&1 || true
-  GHCERT=$("${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/"*/apksigner verify --print-certs "$ART/gearhead-preinstalled.apk" 2>/dev/null | grep -m1 'SHA-256' | awk '{print $NF}')
+  # NEVER inside $ART: proprietary APK must not land in public artifacts
+  GHAPK="${RUNNER_TEMP:-/tmp}/gearhead-preinstalled.apk"
+  adb -s "$SER" pull "$GHPATH" "$GHAPK" >/dev/null 2>&1 || true
+  GHCERT=$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/*/apksigner 2>/dev/null | head -1)
+  [ -n "$GHCERT" ] && GHCERT=$("$GHCERT" verify --print-certs "$GHAPK" 2>/dev/null | grep -m1 'SHA-256' | awk '{print $NF}')
+  rm -f "$GHAPK"
   note "gearhead (Android Auto) present, versionName=$GHVER cert-sha256=$GHCERT"; row gearhead gate executed "pm list packages v=$GHVER cert=$GHCERT"
 else
   gate_block "gearhead not preinstalled on this image"; row gearhead gate gate-blocked "package missing"
