@@ -285,7 +285,8 @@ public class PhoneActivity extends Activity implements State.Listener {
                 + "threshold while you are approaching (one shot per approach, 45 s cooldown). "
                 + "Residual risk: the radio is never authenticated TO the phone, so a relay/"
                 + "spoof device near home could still trigger it. The safe default is OFF "
-                + "with the per-gate OPEN buttons.");
+                + "with the per-gate OPEN buttons. Continuous nearby radio scanning (needed "
+                + "for walk-up) uses extra battery.");
         autoRisk.setTextSize(11);
         autoRisk.setPadding(dp(6), 0, dp(6), dp(6));
         root.addView(autoRisk);
@@ -395,7 +396,7 @@ public class PhoneActivity extends Activity implements State.Listener {
                 bind.setText("bind " + (advName.isEmpty() ? "radio " : advName + " / ")
                         + stNow.rssiMac + " (" + stNow.rssi + " dBm) → " + g.name
                         + (serialMatch ? " · name=serial (unverified)" : " (tentative)"));
-                if (stNow.rssi < -67 && !serialMatch) {
+                if (stNow.rssi < -67) {   // heuristic for ALL radios, serial-named or not
                     bind.setEnabled(false);
                     bind.setText("too far to bind (" + stNow.rssi + " dBm) — stand 1-2 m from " + g.name);
                 }

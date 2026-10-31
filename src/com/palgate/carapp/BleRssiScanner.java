@@ -153,7 +153,10 @@ public final class BleRssiScanner {
         boolean bleTrigger = State.Prefs.get().triggerMode != State.TRIG_GPS;
         boolean want = distM < 0 ? bleTrigger
                 : distM < Math.max(400.0, State.Prefs.get().radiusM * 2.5);
-        nearMode = distM >= 0 && distM < 150.0;
+        // This build's trigger is the radio itself: the 3 s sustained-signal
+        // dwell needs low-latency scanning even with no GPS fix (LOW_POWER's
+        // duty cycle would starve it). Battery cost is disclosed in the app.
+        nearMode = true;
         if (want && !running) {
             start();
         } else if (!want && running) {
