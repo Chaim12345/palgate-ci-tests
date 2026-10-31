@@ -1,6 +1,7 @@
 import android.content.Context;
 import android.content.SharedPreferences;
 import com.palgate.carapp.Gate;
+import com.palgate.carapp.Approach;
 import com.palgate.carapp.GateAssoc;
 import com.palgate.carapp.GateCrypto;
 
@@ -51,6 +52,7 @@ public class GateLocalTest {
         testRuntimeGateLayer();
         testGateAssociation();
         testManualResolve();
+        testApproachPolicy();
         System.out.println(failures == 0 ? "ALL LOCAL TESTS PASS" : failures + " FAILURES");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -278,5 +280,77 @@ public class GateLocalTest {
         one.add(mk(32.0, 34.0));
         check(GateAssoc.resolveManual(one, true, 31.0, 33.0, 40, out) == GateAssoc.RESOLVE_ONE
                 && out[0] == one.get(0), "single gate always resolves");
+    }
+
+    static void testApproachPolicy() {
+        long T0 = 1000000000000L, S = 1000000000L;
+        // freshQualified matrix (monotonic ns)
+        check(Approach.freshQualified(T0, 20f, 120, T0 + 5 * S), "fresh accurate fix qualifies");
+        check(!Approach.freshQualified(T0, 20f, 120, T0 + 16 * S), "stale fix (>15 s) rejected");
+        check(!Approach.freshQualified(T0, 100f, 120, T0 + 5 * S), "coarse fix rejected");
+        check(Approach.freshQualified(T0, 100f, 500, T0 + 5 * S), "wide-radius fix qualifies");
+        check(!Approach.freshQualified(T0 + 10 * S, 20f, 120, T0), "future fix rejected");
+        check(!Approach.freshQualified(0, 20f, 120, T0), "missing fix time rejected");
+        check(!Approach.freshQualified(T0, 0f, 120, T0 + 5 * S), "zero accuracy rejected");
+
+        Gate a = mk(32.0, 34.0);
+        Gate b = mk(32.0, 35.0);   // due east: a northward walk is perpendicular
+        double step = 0.0000216;   // ~2.4 m; one per 2 s = 1.2 m/s walk
+        long[] ts = new long[6];
+        double[] la = new double[6], lo = new double[6];
+        float[] ac = new float[6];
+        for (int i = 0; i < 6; i++) {
+            ts[i] = T0 + i * 2 * S;
+            la[i] = 32.0 - (5 - i) * step;
+            lo[i] = 34.0;
+            ac[i] = 5f;
+        }
+        check(Approach.approaching(ts, la, lo, ac, a), "real approach passes (12 m over 10 s)");
+        check(!Approach.approaching(ts, la, lo, ac, b), "same motion is not an approach to the other gate");
+
+        // stationary with GPS wander +-3 m, acc 5: bound is max(6, 2*5)=10 m
+        double[] noisy = new double[6];
+        for (int i = 0; i < 6; i++) noisy[i] = 31.9999 + (i % 2 == 0 ? 0.000027 : -0.000027);
+        check(!Approach.approaching(ts, noisy, lo, ac, a), "stationary noisy fixes do not pass");
+        float[] ac20 = new float[6];
+        java.util.Arrays.fill(ac20, 20f);
+        check(!Approach.approaching(ts, noisy, lo, ac20, a), "wander under the 2x-accuracy bound fails");
+        float[] ac25 = new float[6];
+        java.util.Arrays.fill(ac25, 25f);
+        check(!Approach.approaching(ts, la, lo, ac25, a), "history fixes worse than 20 m fail closed");
+
+        // approached, then stood still the last 6 s
+        double[] stop = new double[6];
+        for (int i = 0; i < 6; i++) stop[i] = 32.0 - Math.max(0, 2 - i) * step - 2 * step;
+        check(!Approach.approaching(ts, stop, lo, ac, a), "stopped-after-approach does not pass");
+
+        // approach ended more than 12 s before the last fix
+        long[] ts2 = new long[8];
+        double[] la2 = new double[8], lo2 = new double[8];
+        float[] ac2 = new float[8];
+        for (int i = 0; i < 8; i++) {
+            ts2[i] = T0 + i * 3 * S;
+            la2[i] = 32.0 - Math.max(0, 4 - i) * step;
+            lo2[i] = 34.0;
+            ac2[i] = 5f;
+        }
+        check(!Approach.approaching(ts2, la2, lo2, ac2, a), "approach older than 12 s does not count");
+
+        check(!Approach.approaching(new long[]{T0, T0 + 2 * S, T0 + 4 * S},
+                new double[]{32.0 - 2 * step, 32.0 - step, 32.0}, new double[]{34.0, 34.0, 34.0},
+                new float[]{5f, 5f, 5f}, a), "window shorter than 8 s fails closed");
+
+        long[] oo = ts.clone();
+        long tmp = oo[2]; oo[2] = oo[3]; oo[3] = tmp;
+        check(!Approach.approaching(oo, la, lo, ac, a), "out-of-order fixes fail closed");
+        check(!Approach.approaching(new long[]{T0}, new double[]{32.0}, new double[]{34.0},
+                new float[]{5f}, a), "single fix fails closed");
+
+        // resolver: a stale/coarse fix is handed in as no-fix and must be refused
+        java.util.List<Gate> pair = new java.util.ArrayList<Gate>();
+        pair.add(mk(32.0, 34.0));
+        pair.add(mk(32.00003, 34.0));
+        check(GateAssoc.resolveManual(pair, false, 32.0, 34.0, 40, new Gate[1])
+                == GateAssoc.RESOLVE_AMBIGUOUS, "stale/unqualified fix refused as ambiguous");
     }
 }

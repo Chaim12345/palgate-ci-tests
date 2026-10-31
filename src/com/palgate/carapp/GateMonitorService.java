@@ -23,6 +23,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.os.Looper;
 
 import java.io.File;
@@ -89,14 +90,15 @@ public class GateMonitorService extends Service {
     private int tier = TIER_FAR;
     private double distSm = Double.MAX_VALUE;
     private long lastFixAtMs;
+    private long lastFixElapsedNs;
     private double lastSmForClosing = Double.MAX_VALUE;
     private float closingEwma;
     private int lastMile = -1;
     private String lastSkipReason = "";
     private boolean rssiFired;
     private long rssiFiredAtMs;
-    /** Recent qualified fixes, for per-gate closing velocity (approach proof). */
-    private static final class FixPt { long t; double lat; double lng; }
+    /** Recent qualified, accurate (<=20 m) fixes for approach measurement. */
+    private static final class FixPt { long t; double lat; double lng; float acc; }
     private final ArrayList<FixPt> fixHist = new ArrayList<>();
     private long lastCsvRowAt;
 
@@ -371,7 +373,7 @@ public class GateMonitorService extends Service {
                     loc.hasSpeed() ? loc.getSpeed() : 0f,
                     loc.hasBearing() ? loc.getBearing() : -1,
                     loc.getProvider() == null ? "" : loc.getProvider(),
-                    loc.getTime());
+                    loc.getTime(), loc.getElapsedRealtimeNanos());
         }
 
         @Override public void onStatusChanged(String p, int st, Bundle ex) { }
@@ -384,13 +386,18 @@ public class GateMonitorService extends Service {
     // ------------------------------------------------------ proximity core --
 
     private void handleFix(double lat, double lng, float acc, float speed,
-                           double bearing, String provider, long fixTime) {
+                           double bearing, String provider, long fixTime, long fixElapsedNs) {
         List<Gate> g = Gate.load(this);          // cached; reloads on override change
         if (g != gates) {
             gates = g;
             State.get().log("gate list reloaded (" + gates.size() + " gate(s))");
         }
         State s = State.get();
+        long nowNs = SystemClock.elapsedRealtimeNanos();
+        if (fixElapsedNs > nowNs + 2_000_000_000L) {
+            State.get().log("fix timestamped in the future — ignored");
+            return;
+        }
         s.hasFix = true;
         s.lat = lat;
         s.lng = lng;
@@ -401,8 +408,7 @@ public class GateMonitorService extends Service {
 
         long now = System.currentTimeMillis();
         int radius = State.Prefs.get().radiusM;
-        boolean qualified = acc <= Math.max(40f, radius * 0.5f)
-                && fixTime > now - 15000L;
+        boolean qualified = Approach.freshQualified(fixElapsedNs, acc, radius, nowNs);
         s.fixQualified = qualified;
 
         // ---- nearest gate, raw distance (from ANY fix: the gate radio must
@@ -417,11 +423,15 @@ public class GateMonitorService extends Service {
             }
         }
         if (scanner != null) scanner.update(raw == Double.MAX_VALUE ? -1 : raw);
-        if (qualified) {
-            FixPt pt = new FixPt();
-            pt.t = now; pt.lat = lat; pt.lng = lng;
-            fixHist.add(pt);
-            while (fixHist.size() > 2 && now - fixHist.get(0).t > 45000) fixHist.remove(0);
+        if (qualified && acc <= Approach.HISTORY_MAX_ACC_M) {
+            int m = fixHist.size();
+            if (m == 0 || fixElapsedNs > fixHist.get(m - 1).t) {   // drop out-of-order fixes
+                FixPt pt = new FixPt();
+                pt.t = fixElapsedNs; pt.lat = lat; pt.lng = lng; pt.acc = acc;
+                fixHist.add(pt);
+                while (fixHist.size() > 2
+                        && fixElapsedNs - fixHist.get(0).t > 45_000_000_000L) fixHist.remove(0);
+            }
         }
         if (!qualified) {
             skipLogOnce(String.format(Locale.ROOT,
@@ -433,6 +443,7 @@ public class GateMonitorService extends Service {
         // ---- smoothing with GPS-teleport damping
         double dt = lastFixAtMs == 0 ? 0 : (now - lastFixAtMs) / 1000.0;
         lastFixAtMs = now;
+        lastFixElapsedNs = fixElapsedNs;
         if (distSm == Double.MAX_VALUE || dt <= 0 || dt > 30) {
             distSm = raw;
         } else {
@@ -526,19 +537,17 @@ public class GateMonitorService extends Service {
 
     /** Closing velocity toward a gate from recent qualified fixes (m/s).
      *  NaN when fix history is too thin: callers must fail closed on NaN. */
-    private float closingToward(Gate g) {
+    private boolean approachingGate(Gate g) {
         int n = fixHist.size();
-        if (g == null || n < 2) return Float.NaN;
-        FixPt last = fixHist.get(n - 1);
-        FixPt first = null;
-        for (int i = n - 2; i >= 0; i--) {
-            first = fixHist.get(i);
-            if (last.t - first.t >= 4000) break;
+        if (g == null || n < 2) return false;
+        long[] ts = new long[n];
+        double[] la = new double[n], lo = new double[n];
+        float[] ac = new float[n];
+        for (int i = 0; i < n; i++) {
+            FixPt pt = fixHist.get(i);
+            ts[i] = pt.t; la[i] = pt.lat; lo[i] = pt.lng; ac[i] = pt.acc;
         }
-        if (first == null || last.t - first.t < 4000) return Float.NaN;
-        double d0 = g.distanceM(first.lat, first.lng);
-        double d1 = g.distanceM(last.lat, last.lng);
-        return (float) ((d0 - d1) / ((last.t - first.t) / 1000.0));
+        return Approach.approaching(ts, la, lo, ac, g);
     }
 
     private void maybeAutoOpen(String reason, float acc, float speed, Gate target) {
@@ -579,12 +588,9 @@ public class GateMonitorService extends Service {
                         "too fast (%.0f km/h) — not opening", speed * 3.6));
                 return;
             }
-            if (p.approachFilter) {
-                float closing = closingToward(target);
-                if (!(closing > 0.5f)) {
-                    skipLogOnce("not measurably closing on the gate — approach filter active");
-                    return;
-                }
+            if (p.approachFilter && !approachingGate(target)) {
+                skipLogOnce("no measured approach to the gate — approach filter active");
+                return;
             }
         } else {
             if (p.triggerMode == State.TRIG_GPS) return;
@@ -641,23 +647,22 @@ public class GateMonitorService extends Service {
                     return;
                 }
                 // Approach evidence (risk reduction, NOT radio authentication):
-                // auto-open needs a FRESH QUALIFIED fix AND measured closing
-                // velocity toward THIS gate from recent fixes. No fix, or a
-                // stale/coarse fix, or no measurable approach: fail closed -
-                // the explicit per-gate OPEN stays available. Speed alone
-                // (moving in any direction) is never accepted as approach,
-                // and a stationary phone at home never auto-opens.
-                long nowMs = System.currentTimeMillis();
-                boolean freshFix = s.fixQualified && lastFixAtMs > 0 && nowMs - lastFixAtMs < 15000;
+                // auto-open needs a FRESH QUALIFIED fix AND a measured
+                // approach to THIS gate: distance shrinking by more than
+                // max(6 m, 2x fix accuracy) over an 8-12 s window of accurate
+                // (<=20 m) fixes, so a stationary phone's GPS wander does not
+                // pass. Speed alone is never accepted. Any gap fails closed -
+                // the explicit per-gate OPEN stays available.
+                boolean freshFix = s.fixQualified && Approach.freshQualified(
+                        lastFixElapsedNs, s.accuracy, p.radiusM, SystemClock.elapsedRealtimeNanos());
                 if (!freshFix) {
                     State.get().log("gate radio ≥ trigger but no fresh qualified fix — not auto-opening (tap the gate's OPEN instead)");
                     State.get().notifyListeners();
                     return;
                 }
-                float closingToGate = closingToward(bound);
-                if (!(closingToGate > 0.5f)) {
+                if (!approachingGate(bound)) {
                     State.get().log(String.format(Locale.ROOT,
-                            "gate radio ≥ trigger but not approaching %s — not auto-opening", bound.name));
+                            "gate radio ≥ trigger but no measured approach to %s — not auto-opening (tap its OPEN instead)", bound.name));
                     State.get().notifyListeners();
                     return;
                 }
@@ -708,8 +713,9 @@ public class GateMonitorService extends Service {
             // user picks the gate explicitly in the app.
             State s = State.get();
             Gate[] out = new Gate[1];
-            boolean freshQ = s.fixQualified && lastFixAtMs > 0
-                    && System.currentTimeMillis() - lastFixAtMs < 15000;
+            boolean freshQ = s.fixQualified && Approach.freshQualified(
+                    lastFixElapsedNs, s.accuracy, State.Prefs.get().radiusM,
+                    SystemClock.elapsedRealtimeNanos());
             int r = GateAssoc.resolveManual(gates, freshQ, s.lat, s.lng,
                     Math.min(State.Prefs.get().radiusM, 40), out);
             if (r == GateAssoc.RESOLVE_ONE) {
