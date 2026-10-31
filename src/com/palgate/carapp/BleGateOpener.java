@@ -23,6 +23,7 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 
@@ -72,6 +73,7 @@ public final class BleGateOpener {
     private int gen;
     private int hintGen = -1;
     private String targetGateId;   // when set, only this gate's key is ever used
+    private boolean strictMacOnly; // explicit target + bound MAC: connect only there
 
     public BleGateOpener(Context ctx, List<Gate> gates, Callback cb) {
         this.ctx = ctx.getApplicationContext();
@@ -92,7 +94,8 @@ public final class BleGateOpener {
         return hasPerm(ctx, Manifest.permission.ACCESS_FINE_LOCATION);
     }
 
-    /** Start the discover+open sequence. Callback fires exactly once. */
+    /** Legacy discover+open without a target; the monitor never uses this
+     *  (all opens are openFor with an explicit gate). Kept for API compat. */
     public void open() {
         open(null);
     }
@@ -103,10 +106,29 @@ public final class BleGateOpener {
      * 15 s discovery scan is most of the open latency. Falls back to a
      * scan if the direct connect fails.
      */
-    /** Open one specific gate: its key, its bound radio, never a guess. */
+    /** Open one specific gate: its key, its bound radio, never a guess.
+     *  Strict by design: the ONLY device we ever connect to is a radio the
+     *  user bound to this gate (bindings come from passive scan sightings in
+     *  the app, never from an open attempt). No discovery fallback, no
+     *  unbound-radio connection - an open attempt can never end up talking to
+     *  an unauthenticated stand-in. */
     public void openFor(String gateId, String preferredMac) {
         targetGateId = gateId;
-        open(preferredMac);
+        String mac = preferredMac;
+        if (mac == null || mac.isEmpty()) {
+            for (Map.Entry<String, String> e : State.Prefs.macMap(ctx).entrySet()) {
+                if (e.getValue().equals(gateId)) {
+                    mac = e.getKey();
+                    break;
+                }
+            }
+        }
+        if (mac == null || mac.isEmpty()) {
+            done(false, "no radio bound to this gate — see it in the app and bind it under GATES first");
+            return;
+        }
+        strictMacOnly = true;
+        open(mac);
     }
 
     public void open(String preferredMac) {
@@ -222,7 +244,7 @@ public final class BleGateOpener {
             for (Cand c : candidates) {
                 if (targetGateId != null) {
                     String gid = State.Prefs.macMap(ctx).get(c.mac);
-                    if (gid != null && !gid.equals(targetGateId)) continue; // another gate's radio
+                    if (!targetGateId.equals(gid)) continue; // bound radios of THIS gate only
                 }
                 if (best == null || c.rssi > best.rssi) best = c;
             }
@@ -240,6 +262,10 @@ public final class BleGateOpener {
         if (finished || g != gen) return;
         if (g == hintGen) {
             hintGen = -1;
+            if (strictMacOnly) {
+                done(false, why + " (bound radio unreachable — no scan fallback)");
+                return;
+            }
             State.get().log("direct connect failed (" + why + ") — scanning instead");
             scan(10000);
             return;
@@ -282,12 +308,14 @@ public final class BleGateOpener {
 
     private void connect(final Cand c, final int g, final int timeoutMs) {
         final Gate gate = pickGate(c);
+        final boolean boundRadio = targetGateId != null
+                && targetGateId.equals(State.Prefs.macMap(ctx).get(c.mac));
         ctx.getSharedPreferences("palgate_car", Context.MODE_PRIVATE).edit()
                 .putInt("lastKeyIdx", gates.indexOf(gate)).apply();
         State.get().log("connecting " + c.mac + " (" + (c.name.isEmpty() ? "unnamed" : c.name)
                 + ") key=" + gate.name);
         try {
-            c.dev.connectGatt(ctx, false, new GattCb(gate, c, g),
+            c.dev.connectGatt(ctx, false, new GattCb(gate, c, g, boundRadio),
                     BluetoothDevice.TRANSPORT_LE);
         } catch (Exception e) {
             fail(g, "connectGatt failed: " + e);
@@ -308,7 +336,11 @@ public final class BleGateOpener {
         private final Cand cand;
         private final int myGen;
 
-        GattCb(Gate g, Cand c, int gen) { gate = g; cand = c; myGen = gen; }
+        private final boolean boundRadio;
+
+        GattCb(Gate g, Cand c, int gen, boolean bound) {
+            gate = g; cand = c; myGen = gen; boundRadio = bound;
+        }
 
         @Override
         public void onConnectionStateChange(final BluetoothGatt g, final int status, final int newState) {
@@ -336,7 +368,7 @@ public final class BleGateOpener {
             }
             BluetoothGattCharacteristic cl = findChar(g, UUID_CLASSIC);
             if (cl != null) {
-                writeClassic(g, cl, gate, cand);
+                writeClassic(g, cl, gate, cand, boundRadio);
                 return;
             }
             fail(myGen, "neither modern (…1201) nor classic (FFE1) char present");
@@ -352,7 +384,7 @@ public final class BleGateOpener {
                 BluetoothGattCharacteristic cl = findChar(g, UUID_CLASSIC);
                 if (cl != null) {
                     State.get().log("challenge read failed → trying classic FFE1");
-                    writeClassic(g, cl, gate, cand);
+                    writeClassic(g, cl, gate, cand, boundRadio);
                 } else {
                     fail(myGen, "challenge read failed (status " + status + ")");
                     try { g.disconnect(); } catch (Exception ignored) { }
@@ -392,7 +424,17 @@ public final class BleGateOpener {
         }
     }
 
-    private void writeClassic(BluetoothGatt g, BluetoothGattCharacteristic c, Gate gate, Cand cand) {
+    private void writeClassic(BluetoothGatt g, BluetoothGattCharacteristic c, Gate gate, Cand cand,
+                              boolean boundRadio) {
+        if (!boundRadio) {
+            // The classic FFE1 payload is a static encrypted block: replayable
+            // by anyone who captures it. It is only ever sent to a radio the
+            // user bound to this gate.
+            done(false, "classic radio not bound to " + gate.name
+                    + " — refusing replayable payload; bind it under GATES first");
+            try { g.disconnect(); } catch (Exception ignored) { }
+            return;
+        }
         try {
             String clean = gate.id.replaceAll("[^0-9A-Za-z]", "").toUpperCase(Locale.ROOT);
             if (clean.length() > 10) clean = clean.substring(0, 10);

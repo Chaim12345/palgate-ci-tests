@@ -199,7 +199,7 @@ public final class State {
         public static final int MODE_PAL_4GBT = 1;
         public static final int MODE_PAL_NETWORK = 2;
         public static final int MODE_PAL_BT = 3;
-        public int openMode = MODE_PAL_NETWORK;
+        public int openMode = MODE_DIRECT_BLE;
 
         /** What fires the automatic open (v1.2 precision).
          *  0 = GPS geofence radius only
@@ -241,12 +241,25 @@ public final class State {
             p.requireAA = sp.getBoolean("requireAA", false);
             p.requireBT = sp.getBoolean("requireBT", false);
             p.radiusM = sp.getInt("radiusM", 120);
-            p.openMode = sp.getInt("openMode", MODE_PAL_NETWORK);
+            p.openMode = sp.getInt("openMode", MODE_DIRECT_BLE);
             p.triggerMode = sp.getInt("triggerMode", TRIG_BLE);
             p.rssiTrigDb = sp.getInt("rssiTrigDb", -75);
             p.rssi1m = sp.getInt("rssi1m", -55);
             p.trackCsv = sp.getBoolean("trackCsv", true);
             p.approachFilter = sp.getBoolean("approachFilter", false);
+
+            // Walk-up build policy: GPS-only / either triggers are disabled
+            // (GPS cannot discriminate gates a few meters apart) and auto-open
+            // starts OFF - this holds for existing installs, not just fresh ones.
+            if (!sp.getBoolean("walkup_defaults_v13", false)) {
+                p.autoOpen = false;
+                sp.edit().putBoolean("autoOpen", false)
+                        .putBoolean("walkup_defaults_v13", true).apply();
+            }
+            if (p.triggerMode != TRIG_BLE) {
+                p.triggerMode = TRIG_BLE;
+                sp.edit().putInt("triggerMode", TRIG_BLE).apply();
+            }
         }
 
         public static void save(Context ctx) {

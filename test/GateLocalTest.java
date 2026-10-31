@@ -50,6 +50,7 @@ public class GateLocalTest {
         testKeylessBundledGate();
         testRuntimeGateLayer();
         testGateAssociation();
+        testManualResolve();
         System.out.println(failures == 0 ? "ALL LOCAL TESTS PASS" : failures + " FAILURES");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -244,5 +245,38 @@ public class GateLocalTest {
                 "unbound radio may NOT auto-open anything");
         check(!GateAssoc.mayAutoOpen(bind, gates, "02:11:22:33:44:55", null),
                 "null target never auto-opens");
+    }
+
+    static void testManualResolve() {
+        Context ctx = new Context(new File("assets"), prefs(501));
+        List<Gate> gates = Gate.load(ctx);   // TEST000001 @32.0853,34.7818 / TEST000002 @32.09,34.78
+        Gate[] out = new Gate[1];
+
+        check(GateAssoc.resolveManual(gates, false, 0, 0, 40, out) == GateAssoc.RESOLVE_AMBIGUOUS,
+                "two gates + no fix = ambiguous refuse");
+        check(GateAssoc.resolveManual(new java.util.ArrayList<Gate>(), true, 32.0853, 34.7818, 40, out)
+                == GateAssoc.RESOLVE_NONE, "no gates = none");
+
+        // standing at gate 1 only: gate 2 is ~1.1 km away in the fixture -> unambiguous
+        int r = GateAssoc.resolveManual(gates, true, 32.0853, 34.7818, 40, out);
+        check(r == GateAssoc.RESOLVE_ONE && out[0].id.equals("TEST000001"),
+                "exactly one gate in manual range resolves to it");
+
+        // far from both -> out of range refuse (no silent nearest pick)
+        check(GateAssoc.resolveManual(gates, true, 31.0, 34.0, 40, out)
+                == GateAssoc.RESOLVE_OUT_OF_RANGE, "far from all gates = out of range refuse");
+
+        // two co-located gates (3 m apart) both in range -> ambiguous refuse
+        List<Gate> pair = new java.util.ArrayList<Gate>();
+        pair.add(mk(32.0, 34.0));
+        pair.add(mk(32.00003, 34.0));
+        check(GateAssoc.resolveManual(pair, true, 32.0, 34.0, 40, out)
+                == GateAssoc.RESOLVE_AMBIGUOUS, "co-located gates both in range = ambiguous refuse");
+
+        // single configured gate keeps nearest behavior even far away
+        List<Gate> one = new java.util.ArrayList<Gate>();
+        one.add(mk(32.0, 34.0));
+        check(GateAssoc.resolveManual(one, true, 31.0, 33.0, 40, out) == GateAssoc.RESOLVE_ONE
+                && out[0] == one.get(0), "single gate always resolves");
     }
 }

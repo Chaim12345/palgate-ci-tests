@@ -525,6 +525,14 @@ public class GateMonitorService extends Service {
             skipLogOnce("auto-open disabled — manual only");
             return;
         }
+        if (p.openMode != State.Prefs.MODE_DIRECT_BLE) {
+            // A bound-MAC advertisement is unauthenticated: anyone can spoof a
+            // MAC. Direct BLE still authenticates the gate by challenge-
+            // response; the PalGate-app delegate modes would open the REAL
+            // gate from the cloud on nothing but a spoofed radio sighting.
+            skipLogOnce("auto-open needs direct BLE mode — PalGate-app modes stay manual");
+            return;
+        }
         if (!s.conditionsMet()) {
             skipLogOnce("in range but conditions not met ("
                     + (s.testMode || !p.requireAA || s.aaConnected ? "AA✓" : "AA✗")
@@ -580,6 +588,10 @@ public class GateMonitorService extends Service {
                 // phone. PalGate units share service UUIDs, so a neighbor's
                 // gate (or the second gate 3 m away) looks identical until
                 // bound; unbound radios never trigger an open.
+                if (p.openMode != State.Prefs.MODE_DIRECT_BLE) {
+                    State.get().notifyListeners();
+                    return;   // delegate modes never auto-open (unauthenticated radio)
+                }
                 Gate bound = GateAssoc.boundGate(
                         State.Prefs.macMap(GateMonitorService.this), gates, mac);
                 if (bound == null) {
@@ -634,10 +646,31 @@ public class GateMonitorService extends Service {
                     break;
                 }
             }
-        }
-        if (target == null) {
-            target = State.get().nearest != null ? State.get().nearest
-                    : (gates.isEmpty() ? null : gates.get(0));
+            if (target == null) {
+                State.get().log("✘ OPEN FAILED — unknown gate id " + gateId);
+                return;
+            }
+        } else {
+            // Generic (widget / OPEN NOW) press with several gates configured:
+            // GPS cannot tell gates a few meters apart, so only an
+            // unambiguous in-range single gate may be opened; otherwise the
+            // user picks the gate explicitly in the app.
+            State s = State.get();
+            Gate[] out = new Gate[1];
+            int r = GateAssoc.resolveManual(gates, s.hasFix, s.lat, s.lng,
+                    Math.min(State.Prefs.get().radiusM, 40), out);
+            if (r == GateAssoc.RESOLVE_ONE) {
+                target = out[0];
+            } else if (r == GateAssoc.RESOLVE_NONE) {
+                State.get().log("✘ OPEN FAILED — no gate configured");
+                return;
+            } else if (r == GateAssoc.RESOLVE_AMBIGUOUS) {
+                State.get().log("✘ OPEN REFUSED — several gates in range; open the specific gate from the app");
+                return;
+            } else {
+                State.get().log("✘ OPEN REFUSED — not at any gate; open the specific gate from the app");
+                return;
+            }
         }
         runOpen("manual", target);
     }

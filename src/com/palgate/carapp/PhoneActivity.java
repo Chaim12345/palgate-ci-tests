@@ -209,29 +209,16 @@ public class PhoneActivity extends Activity implements State.Listener {
         root.addView(palv);
 
         // ------------------------------------------------------- triggers --
-        root.addView(label("AUTO-OPEN TRIGGER — what fires the open"));
-        String[] trigTitles = {
-                "A · GPS radius only (classic geofence)",
-                "B · Gate radio only — open when BLE RSSI ≥ threshold (most exact at the barrier)",
-                "C · Either — GPS radius or gate radio, whichever first"
-        };
-        final int[] trigVals = { State.TRIG_GPS, State.TRIG_BLE, State.TRIG_EITHER };
-        for (int i = 0; i < trigTitles.length; i++) {
-            final int val = trigVals[i];
-            final TextView row = new TextView(this);
-            boolean cur = State.Prefs.get().triggerMode == val;
-            row.setText((cur ? "◉ " : "○ ") + trigTitles[i]);
-            row.setTextSize(14);
-            row.setPadding(dp(6), dp(8), dp(6), dp(8));
-            row.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    State.Prefs.get().triggerMode = val;
-                    State.Prefs.save(PhoneActivity.this);
-                    recreate();
-                }
-            });
-            root.addView(row);
-        }
+        root.addView(label("AUTO-OPEN TRIGGER"));
+        TextView trigNote = new TextView(this);
+        trigNote.setText("Trigger in this build: the gate's own radio (RSSI) only. "
+                + "GPS-only opening is disabled — GPS can't tell gates a few meters apart. "
+                + "Automatic opening also requires direct BLE mode: its challenge-response "
+                + "authenticates the gate, while PalGate-app modes would act on a spoofed "
+                + "radio advertisement. Delegate modes stay available for manual opens.");
+        trigNote.setTextSize(12);
+        trigNote.setPadding(dp(6), dp(2), dp(6), dp(8));
+        root.addView(trigNote);
 
         root.addView(label("GATE RADIO THRESHOLD (dBm) — e.g. -75 ≈ 10 m, -85 ≈ 30 m after calibration"));
         final EditText edDb = new EditText(this);
