@@ -19,7 +19,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
 
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -308,14 +307,12 @@ public final class BleGateOpener {
 
     private void connect(final Cand c, final int g, final int timeoutMs) {
         final Gate gate = pickGate(c);
-        final boolean boundRadio = targetGateId != null
-                && targetGateId.equals(State.Prefs.macMap(ctx).get(c.mac));
         ctx.getSharedPreferences("palgate_car", Context.MODE_PRIVATE).edit()
                 .putInt("lastKeyIdx", gates.indexOf(gate)).apply();
         State.get().log("connecting " + c.mac + " (" + (c.name.isEmpty() ? "unnamed" : c.name)
                 + ") key=" + gate.name);
         try {
-            c.dev.connectGatt(ctx, false, new GattCb(gate, c, g, boundRadio),
+            c.dev.connectGatt(ctx, false, new GattCb(gate, c, g),
                     BluetoothDevice.TRANSPORT_LE);
         } catch (Exception e) {
             fail(g, "connectGatt failed: " + e);
@@ -336,11 +333,7 @@ public final class BleGateOpener {
         private final Cand cand;
         private final int myGen;
 
-        private final boolean boundRadio;
-
-        GattCb(Gate g, Cand c, int gen, boolean bound) {
-            gate = g; cand = c; myGen = gen; boundRadio = bound;
-        }
+        GattCb(Gate g, Cand c, int gen) { gate = g; cand = c; myGen = gen; }
 
         @Override
         public void onConnectionStateChange(final BluetoothGatt g, final int status, final int newState) {
@@ -366,12 +359,11 @@ public final class BleGateOpener {
                 if (!g.readCharacteristic(ch)) fail(myGen, "readCharacteristic rejected");
                 return;
             }
-            BluetoothGattCharacteristic cl = findChar(g, UUID_CLASSIC);
-            if (cl != null) {
-                writeClassic(g, cl, gate, cand, boundRadio);
-                return;
+            if (findChar(g, UUID_CLASSIC) != null) {
+                fail(myGen, "classic (FFE0-only) gate firmware not supported in this build");
+            } else {
+                fail(myGen, "neither modern (…1201) nor classic (FFE1) char present");
             }
-            fail(myGen, "neither modern (…1201) nor classic (FFE1) char present");
             try { g.disconnect(); } catch (Exception ignored) { }
         }
 
@@ -381,14 +373,8 @@ public final class BleGateOpener {
             if (!UUID_CHALLENGE.equals(c.getUuid().toString().toLowerCase(Locale.ROOT))) return;
             byte[] value = c.getValue();
             if (status != 0 || value == null || value.length != 16) {
-                BluetoothGattCharacteristic cl = findChar(g, UUID_CLASSIC);
-                if (cl != null) {
-                    State.get().log("challenge read failed → trying classic FFE1");
-                    writeClassic(g, cl, gate, cand, boundRadio);
-                } else {
-                    fail(myGen, "challenge read failed (status " + status + ")");
-                    try { g.disconnect(); } catch (Exception ignored) { }
-                }
+                fail(myGen, "challenge read failed (status " + status + ")");
+                try { g.disconnect(); } catch (Exception ignored) { }
                 return;
             }
             try {
@@ -400,7 +386,7 @@ public final class BleGateOpener {
                     try { g.disconnect(); } catch (Exception ignored) { }
                     return;
                 }
-                State.get().log("CR response written (" + gate.name + "): " + GateCrypto.hexStr(resp));
+                State.get().log("CR response written (" + gate.name + ")");
                 wc.setValue(resp);
                 wc.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
                 if (!g.writeCharacteristic(wc)) {
@@ -420,38 +406,6 @@ public final class BleGateOpener {
         public void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic c, int status) {
             if (myGen != gen || finished) return;
             if (status != 0) fail(myGen, "GATT write failed (status " + status + ")");
-            try { g.disconnect(); } catch (Exception ignored) { }
-        }
-    }
-
-    private void writeClassic(BluetoothGatt g, BluetoothGattCharacteristic c, Gate gate, Cand cand,
-                              boolean boundRadio) {
-        if (!boundRadio) {
-            // The classic FFE1 payload is a static encrypted block: replayable
-            // by anyone who captures it. It is only ever sent to a radio the
-            // user bound to this gate.
-            done(false, "classic radio not bound to " + gate.name
-                    + " — refusing replayable payload; bind it under GATES first");
-            try { g.disconnect(); } catch (Exception ignored) { }
-            return;
-        }
-        try {
-            String clean = gate.id.replaceAll("[^0-9A-Za-z]", "").toUpperCase(Locale.ROOT);
-            if (clean.length() > 10) clean = clean.substring(0, 10);
-            StringBuilder sb = new StringBuilder("AB").append(clean);
-            while (sb.length() < 16) sb.append('?');
-            byte[] enc = GateCrypto.buildClassicPayload(GateCrypto.hex(gate.keyHex), gate.id, new SecureRandom());
-            State.get().log("classic payload written (" + gate.name + ")");
-            c.setValue(enc);
-            c.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
-            if (!g.writeCharacteristic(c)) {
-                done(false, "writeCharacteristic rejected (classic)");
-                return;
-            }
-            State.Prefs.learnMac(ctx, cand.mac, gate.id);
-            done(true, "classic payload written to " + gate.name);
-        } catch (Exception e) {
-            done(false, "classic error: " + e);
             try { g.disconnect(); } catch (Exception ignored) { }
         }
     }

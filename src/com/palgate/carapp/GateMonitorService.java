@@ -94,6 +94,7 @@ public class GateMonitorService extends Service {
     private String lastSkipReason = "";
     private boolean rssiFired;
     private long rssiFiredAtMs;
+    private long lastMotionAtMs;
     private long lastCsvRowAt;
 
     private final Runnable stopCheck = new Runnable() {
@@ -437,6 +438,7 @@ public class GateMonitorService extends Service {
             float v = (float) ((lastSmForClosing - distSm) / dt);
             closingEwma = closingEwma == 0f ? v : closingEwma * 0.6f + v * 0.4f;
         }
+        if (speed > 0.5f || closingEwma > 0.5f) lastMotionAtMs = now;
         lastSmForClosing = distSm;
         float eta = closingEwma > 0.8f && distSm > radius
                 ? (float) ((distSm - radius) / closingEwma) : -1f;
@@ -607,6 +609,17 @@ public class GateMonitorService extends Service {
                 }
                 if (s.lastOpenAtMs > 0
                         && System.currentTimeMillis() - s.lastOpenAtMs < OPEN_COOLDOWN_MS) {
+                    State.get().notifyListeners();
+                    return;
+                }
+                // Approach evidence (risk reduction, NOT radio authentication):
+                // with a recent qualified fix, require actual motion; with no
+                // fix (parking garage), the RSSI rise edge + one-shot latch
+                // stand alone. A stationary phone at home never auto-opens.
+                long nowMs = System.currentTimeMillis();
+                boolean recentFix = lastFixAtMs > 0 && nowMs - lastFixAtMs < 30000;
+                if (recentFix && nowMs - lastMotionAtMs > 30000) {
+                    State.get().log("gate radio ≥ trigger but no approach motion — not auto-opening");
                     State.get().notifyListeners();
                     return;
                 }

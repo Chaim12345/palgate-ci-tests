@@ -276,6 +276,15 @@ public class PhoneActivity extends Activity implements State.Listener {
         addToggle(root, "auto-open when trigger fires", p.autoOpen, new ToggleCb() {
             @Override public void set(boolean v) { p.autoOpen = v; State.Prefs.save(PhoneActivity.this); }
         });
+        TextView autoRisk = new TextView(this);
+        autoRisk.setText("When ON: opens via direct BLE when your BOUND gate radio crosses the "
+                + "threshold while you are approaching (one shot per approach, 45 s cooldown). "
+                + "Residual risk: the radio is never authenticated TO the phone, so a relay/"
+                + "spoof device near home could still trigger it. The safe default is OFF "
+                + "with the per-gate OPEN buttons.");
+        autoRisk.setTextSize(11);
+        autoRisk.setPadding(dp(6), 0, dp(6), dp(6));
+        root.addView(autoRisk);
         addToggle(root, "require Android Auto connected", p.requireAA, new ToggleCb() {
             @Override public void set(boolean v) { p.requireAA = v; State.Prefs.save(PhoneActivity.this); }
         });
