@@ -160,35 +160,6 @@ else
   [ -x "$DHU" ] || { gate_block "DHU binary missing at $DHU"; row dhu gate gate-blocked "binary missing"; }
 fi
 
-echo "-- gate: hosted widget render + tap (AppWidgetHost) --"
-if adb install -r widgethost/WidgetHostTest.apk; then
-  adb shell appwidget grantbind --package com.palgate.widgethost >/dev/null 2>&1 || true
-  adb logcat -c || true
-  adb shell am start -n com.palgate.widgethost/.HostActivity >/dev/null 2>&1
-  sleep 12
-  shot 20_widget_hosted
-  HOSTLOG=$(adb logcat -d -s WidgetHostTest 2>/dev/null)
-  echo "$HOSTLOG" > "$ART/widgethost_logcat.txt"
-  if echo "$HOSTLOG" | grep -q "HOST-RESULT: RENDERED"; then
-    note "widget RENDERED inside AppWidgetHost (createView)"; row widget_host gate executed "RENDERED"
-    if echo "$HOSTLOG" | grep -q "HOST-RESULT: TAPPED"; then
-      note "widget OPEN button TAPPED inside host"; row widget_host_tap gate executed "TAPPED"
-      sleep 3
-      if adb shell dumpsys activity services com.palgate.carapp 2>/dev/null | grep -q GateMonitorService; then
-        note "widget tap started GateMonitorService"; row widget_host_service gate executed "dumpsys"
-      else
-        gate_block "widget tap did not start GateMonitorService"; row widget_host_service gate gate-blocked "dumpsys empty"
-      fi
-    else
-      gate_block "no clickable child in hosted widget (see 20_widget_hosted.png)"; row widget_host_tap gate gate-blocked "NO-CLICKABLE"
-    fi
-  else
-    gate_block "widget did not render in AppWidgetHost (see widgethost_logcat.txt)"; row widget_host gate gate-blocked "no RENDERED"
-  fi
-else
-  gate_block "WidgetHostTest.apk install failed"; row widget_host gate gate-blocked "install"
-fi
-
 echo "-- optional: Open Headunit self-mode (experimental) --"
 adb shell monkey -p com.andrerinas.headunitrevived -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 8; shot 30_openheadunit

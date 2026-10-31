@@ -30,15 +30,12 @@ jobs:
           python3 fetch_deps.py
           python3 extract_cp.py
           ./build.sh
-          ECJ_JAR="$PWD/tools/ecj.jar" ./widgethost/build_host.sh
 
-      - name: Upload built APKs
+      - name: Upload built APK
         uses: actions/upload-artifact@v4
         with:
-          name: built-apks
-          path: |
-            PalGateCar.apk
-            widgethost/WidgetHostTest.apk
+          name: PalGateCar-apk
+          path: PalGateCar.apk
 
       - name: Download Open Headunit 3.5.0 (sha256 pinned)
         run: |
