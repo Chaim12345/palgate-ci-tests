@@ -142,21 +142,35 @@ fi
 echo "-- gate: DHU reference projection --"
 DHU="${ANDROID_HOME:-/usr/local/lib/android/sdk}/extras/google/auto/desktop-head-unit"
 if [ "$HUS" = 1 ] && [ -x "$DHU" ]; then
-  adb forward tcp:5277 tcp:5277
-  ( printf 'help\n'; sleep 45 ) | timeout 60 xvfb-run -a "$DHU" > "$ART/dhu.log" 2>&1 &
+  # manual Xvfb so we can screenshot the DHU window for pixel evidence
+  Xvfb :99 -screen 0 1024x768x24 >/dev/null 2>&1 &
+  XVFBPID=$!
+  sleep 2
+  ( printf 'help\n'; sleep 45 ) | DISPLAY=:99 timeout 60 "$DHU" > "$ART/dhu.log" 2>&1 &
   DHUPID=$!
-  sleep 25
-  if grep -qi 'connected\|projection' "$ART/dhu.log" 2>/dev/null; then
-    note "DHU connected to head unit server"; row dhu gate executed "dhu.log"
+  sleep 30
+  # pre-proof failure markers only (auth failure at link time); teardown lines
+  # (disconnect/Exiting) are expected after our own kill and must not fail the gate
+  if grep -qi 'auth failure' "$ART/dhu.log" 2>/dev/null; then
+    gate_block "DHU rejected at link: $(grep -i 'auth failure' "$ART/dhu.log" | head -1)"
+    row dhu gate fail "dhu.log auth failure"
+  elif ! kill -0 $DHUPID 2>/dev/null; then
+    gate_block "DHU exited within 30s of connect (see dhu.log)"; row dhu gate fail "dhu.log early exit"
+  elif grep -qi 'connected' "$ART/dhu.log" 2>/dev/null; then
+    # stable connection: process alive 30s, connected, no failure markers
+    if DISPLAY=:99 import -window root "$ART/50_dhu_window.png" 2>/dev/null; then
+      note "DHU connected + window captured (50_dhu_window.png)"; row dhu gate executed "dhu.log + 50_dhu_window.png"
+    else
+      note "DHU connected (no window capture)"; row dhu gate executed "dhu.log"
+    fi
   else
-    grep -qi 'error\|fail' "$ART/dhu.log" && gate_block "DHU error (see dhu.log)" || gate_block "DHU connection unconfirmed (see dhu.log)"
-    row dhu gate gate-blocked "dhu.log"
+    gate_block "DHU connection unconfirmed (see dhu.log)"; row dhu gate gate-blocked "dhu.log"
   fi
-  printf 'screenshot /sdcard/dhu.png\n' > /dev/null 2>&1 || true
-  wait $DHUPID 2>/dev/null || true
+  kill $DHUPID 2>/dev/null || true
+  kill $XVFBPID 2>/dev/null || true
   tail -5 "$ART/dhu.log" || true
 else
-  [ "$HUS" = 1 ] || { opt "DHU skipped: no head unit server"; row dhu gate gate-blocked "no HUS"; FAILS=$((FAILS+0)); }
+  [ "$HUS" = 1 ] || { opt "DHU skipped: no head unit server"; row dhu gate gate-blocked "no HUS"; }
   [ -x "$DHU" ] || { gate_block "DHU binary missing at $DHU"; row dhu gate gate-blocked "binary missing"; }
 fi
 
