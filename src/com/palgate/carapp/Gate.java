@@ -27,6 +27,17 @@ public class Gate {
     public final String relay;   // relay1 setting, e.g. "02"
     public final String validUntil; // account access expiry, e.g. 2027-10-11T21:00:00.000Z
     public final boolean posOverridden; // position came from on-site calibration
+    // Device profile (PalGate API shape; fixtures model the reference deployment:
+    // model SG304GI / type 4G / subType I / firmware 5.054 / one output / relay "02",
+    // secondary non-admin device, dial-to-open capable, not local-only).
+    public final String type;          // e.g. "4G"
+    public final String subType;       // e.g. "I"
+    public final String firmware;      // e.g. "5.054" ("" when unknown)
+    public final int outputCount;      // physical outputs, e.g. 1
+    public final boolean admin;        // account role on this gate
+    public final boolean secondaryDevice;
+    public final boolean dialToOpen;
+    public final boolean localOnly;
 
     public Gate(String id, String name, double lat, double lng, String keyHex,
                 String model, String mac, String address, String relay, String validUntil) {
@@ -36,6 +47,15 @@ public class Gate {
     public Gate(String id, String name, double lat, double lng, String keyHex,
                 String model, String mac, String address, String relay, String validUntil,
                 boolean posOverridden) {
+        this(id, name, lat, lng, keyHex, model, mac, address, relay, validUntil, posOverridden,
+                "4G", "I", "", 1, false, false, false, false);
+    }
+
+    public Gate(String id, String name, double lat, double lng, String keyHex,
+                String model, String mac, String address, String relay, String validUntil,
+                boolean posOverridden, String type, String subType, String firmware,
+                int outputCount, boolean admin, boolean secondaryDevice,
+                boolean dialToOpen, boolean localOnly) {
         this.id = id;
         this.name = name;
         this.lat = lat;
@@ -47,6 +67,14 @@ public class Gate {
         this.relay = relay;
         this.validUntil = validUntil;
         this.posOverridden = posOverridden;
+        this.type = type;
+        this.subType = subType;
+        this.firmware = firmware;
+        this.outputCount = outputCount;
+        this.admin = admin;
+        this.secondaryDevice = secondaryDevice;
+        this.dialToOpen = dialToOpen;
+        this.localOnly = localOnly;
     }
 
     /** Great-circle distance in meters (haversine). */
@@ -105,7 +133,16 @@ public class Gate {
                         g.optString("mac", null),
                         g.optString("address", ""),
                         g.optString("relay", "02"),
-                        g.optString("validUntil", "2027-10-11T21:00:00.000Z")));
+                        g.optString("validUntil", "2027-10-11T21:00:00.000Z"),
+                        false,
+                        g.optString("type", "4G"),
+                        g.optString("subType", "I"),
+                        g.optString("firmware", ""),
+                        g.optInt("outputCount", 1),
+                        g.optBoolean("admin", false),
+                        g.optBoolean("secondaryDevice", false),
+                        g.optBoolean("dialToOpen", false),
+                        g.optBoolean("localOnly", false)));
             }
         } catch (Exception e) {
             android.util.Log.e("PalGate", "gates.json load failed", e);
@@ -168,7 +205,9 @@ public class Gate {
                     Gate g = gates.get(i);
                     if (g.id.equals(id)) {
                         gates.set(i, new Gate(g.id, g.name, lat, lng, g.keyHex, g.model,
-                                g.mac, g.address, g.relay, g.validUntil, true));
+                                g.mac, g.address, g.relay, g.validUntil, true,
+                                g.type, g.subType, g.firmware, g.outputCount,
+                                g.admin, g.secondaryDevice, g.dialToOpen, g.localOnly));
                         break;
                     }
                 }

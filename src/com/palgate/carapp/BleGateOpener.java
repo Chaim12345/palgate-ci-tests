@@ -25,8 +25,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
-import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
 
 /**
  * BLE gate opener — byte-identical protocol to the validated palgate_ble_open.py /
@@ -54,7 +52,6 @@ public final class BleGateOpener {
     private static final String UUID_CHALLENGE = "9c23af10-0000-1000-8000-00805f9b1201";
     private static final String UUID_RESPONSE  = "9c23af10-0000-1000-8000-00805f9b1202";
     private static final String UUID_CLASSIC   = "0000ffe1-0000-1000-8000-00805f9b34fb";
-    private static final byte[] CR_CMD_OPEN = {0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0};
 
     private static final ParcelUuid SVC_MODERN =
             ParcelUuid.fromString("9c23af10-0000-1000-8000-00805f9b34fb");
@@ -344,17 +341,15 @@ public final class BleGateOpener {
                 return;
             }
             try {
-                byte[] key = hex(gate.keyHex);
-                byte[] dec = aes(key, value, false);
-                byte[] enc = aes(key, concat(copy(dec, 4), CR_CMD_OPEN), true);
-                byte[] resp = concat(copy(dec, 4), enc);
+                byte[] key = GateCrypto.hex(gate.keyHex);
+                byte[] resp = GateCrypto.buildModernResponse(key, value);
                 BluetoothGattCharacteristic wc = findChar(g, UUID_RESPONSE);
                 if (wc == null) {
                     done(false, "response char …1202 missing");
                     try { g.disconnect(); } catch (Exception ignored) { }
                     return;
                 }
-                State.get().log("CR response written (" + gate.name + "): " + hexStr(resp));
+                State.get().log("CR response written (" + gate.name + "): " + GateCrypto.hexStr(resp));
                 wc.setValue(resp);
                 wc.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
                 if (!g.writeCharacteristic(wc)) {
@@ -382,12 +377,10 @@ public final class BleGateOpener {
         try {
             String clean = gate.id.replaceAll("[^0-9A-Za-z]", "").toUpperCase(Locale.ROOT);
             if (clean.length() > 10) clean = clean.substring(0, 10);
-            SecureRandom rng = new SecureRandom();
             StringBuilder sb = new StringBuilder("AB").append(clean);
-            while (sb.length() < 14) sb.append((char) ('0' + rng.nextInt(10)));
-            while (sb.length() < 16) sb.append((char) ('0' + rng.nextInt(10)));
-            byte[] enc = aes(hex(gate.keyHex), sb.toString().getBytes("US-ASCII"), true);
-            State.get().log("classic payload written (" + gate.name + "): " + sb);
+            while (sb.length() < 16) sb.append('?');
+            byte[] enc = GateCrypto.buildClassicPayload(GateCrypto.hex(gate.keyHex), gate.id, new SecureRandom());
+            State.get().log("classic payload written (" + gate.name + ")");
             c.setValue(enc);
             c.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
             if (!g.writeCharacteristic(c)) {
@@ -420,37 +413,5 @@ public final class BleGateOpener {
             if (c != null) return c;
         }
         return null;
-    }
-
-    private static byte[] aes(byte[] key, byte[] block, boolean encrypt) throws Exception {
-        Cipher c = Cipher.getInstance("AES/ECB/NoPadding");
-        c.init(encrypt ? Cipher.ENCRYPT_MODE : Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"));
-        return c.doFinal(block);
-    }
-
-    private static byte[] hex(String s) {
-        byte[] r = new byte[s.length() / 2];
-        for (int i = 0; i < r.length; i++)
-            r[i] = (byte) Integer.parseInt(s.substring(2 * i, 2 * i + 2), 16);
-        return r;
-    }
-
-    private static String hexStr(byte[] b) {
-        StringBuilder sb = new StringBuilder();
-        for (byte x : b) sb.append(String.format(Locale.ROOT, "%02x", x));
-        return sb.length() > 24 ? sb.substring(0, 24) + "…" : sb.toString();
-    }
-
-    private static byte[] concat(byte[] a, byte[] b) {
-        byte[] r = new byte[a.length + b.length];
-        System.arraycopy(a, 0, r, 0, a.length);
-        System.arraycopy(b, 0, r, a.length, b.length);
-        return r;
-    }
-
-    private static byte[] copy(byte[] a, int n) {
-        byte[] r = new byte[n];
-        System.arraycopy(a, 0, r, 0, Math.min(n, a.length));
-        return r;
     }
 }
