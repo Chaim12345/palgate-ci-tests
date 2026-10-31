@@ -71,7 +71,7 @@ jobs:
 
       - name: Run Android Auto + widget tests
         env:
-          RUN_DHU: ${{ (contains(github.event.head_commit.message, '[dhu]') || github.event_name == 'workflow_dispatch') && '1' || '0' }}
+          RUN_DHU: ${{ (contains(github.event.head_commit.message, '[dhu-run]') || github.event_name == 'workflow_dispatch') && '1' || '0' }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30

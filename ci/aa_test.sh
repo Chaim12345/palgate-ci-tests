@@ -223,7 +223,7 @@ else
 fi
 
 else
-  opt "DHU stage skipped (known blocked; include [dhu] in the commit message or run manually to re-attempt)"
+  opt "DHU stage skipped (known blocked; include the dhu-run marker in the commit message or run manually to re-attempt)"
   row dhu gate skipped "RUN_DHU=0"
 fi
 

@@ -41,7 +41,7 @@ public class GateWidgetProvider extends AppWidgetProvider {
         }
         v.setTextViewText(R.id.w_title, title);
         v.setTextViewText(R.id.w_status, status);
-        v.setTextColor(R.id.w_status, s.inRange ? 0xFF69F0AE : 0xFFE6F1FF);
+        v.setTextColor(R.id.w_status, ctx.getColor(s.inRange ? R.color.widget_text_inrange : R.color.widget_text));
 
         Intent open = new Intent(ctx, GateMonitorService.class);
         open.setAction(GateMonitorService.ACTION_OPEN_NOW);
