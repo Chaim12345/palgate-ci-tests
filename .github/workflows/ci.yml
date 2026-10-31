@@ -19,7 +19,9 @@ jobs:
         run: |
           SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SM" --licenses >/dev/null || true
-          "$SM" "platforms;android-34" "build-tools;34.0.0" "platform-tools" "emulator"
+          "$SM" "platforms;android-34" "build-tools;34.0.0" "platform-tools" "emulator" "extras;google;auto"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libc++1 libc++abi1 xvfb
 
       - name: Fetch androidx deps and build APK
         env:
@@ -28,12 +30,15 @@ jobs:
           python3 fetch_deps.py
           python3 extract_cp.py
           ./build.sh
+          ECJ_JAR="$PWD/tools/ecj.jar" ./widgethost/build_host.sh
 
-      - name: Upload built APK
+      - name: Upload built APKs
         uses: actions/upload-artifact@v4
         with:
-          name: PalGateCar-apk
-          path: PalGateCar.apk
+          name: built-apks
+          path: |
+            PalGateCar.apk
+            widgethost/WidgetHostTest.apk
 
       - name: Download Open Headunit 3.5.0 (sha256 pinned)
         run: |
