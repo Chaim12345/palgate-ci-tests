@@ -553,8 +553,9 @@ public class PhoneActivity extends Activity implements State.Listener {
         TextView how = new TextView(this);
         how.setText("How to make detection exact: 1) drive to the gate, tap “set position "
                 + "= HERE” — this removes the cloud-coordinate offset. 2) Stand 1 m from "
-                + "the gate, tap “CALIBRATE gate radio”. 3) Pick trigger B or C so the "
-                + "gate’s own radio confirms arrival. 4) Export the track CSV after a few "
+                + "the gate, tap “CALIBRATE gate radio”. 3) The gate’s own bound radio "
+                + "is the trigger: walk-up uses it (GPS-verified approach by default, "
+                + "Bluetooth-only optional). 4) Export the track CSV after a few "
                 + "drives and compare dist_smooth_m / rssi_est_m with reality.\n\n"
                 + "Android Auto: enable Developer settings in the Android Auto app "
                 + "(tap the version 10×), then allow “Unknown sources”. PalGate Car "
