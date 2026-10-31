@@ -28,7 +28,7 @@ mapfile -t FLATS < <(find "$OUT/compiled-res" -name '*.flat' | sort)
 "$BT/aapt2" link -I "$PLAT" \
   --manifest "$SRC/AndroidManifest.xml" \
   --min-sdk-version 23 --target-sdk-version 34 \
-  --version-code 3 --version-name 1.2 \
+  --version-code 4 --version-name 1.3 \
   -A "$SRC/assets" \
   --java "$OUT/gen" \
   -o "$OUT/base.apk" \

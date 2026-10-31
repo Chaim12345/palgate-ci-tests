@@ -13,3 +13,4 @@ AC371711D2B0B687C5EA24A46D81B2F8FB196590 # KAT modern golden 2 (openssl-computed
 0ADE3D4CDED5CDA48752324AB50D782148D16BDC # KAT modern golden 3 (openssl-computed)
 02:11:22:33:44:55 # synthetic gate MAC A (locally-administered 02: prefix)
 02:66:77:88:99:AA # synthetic gate MAC B (locally-administered 02: prefix)
+02:AA:BB:CC:DD:EE # synthetic unknown-radio MAC (locally-administered 02: prefix)

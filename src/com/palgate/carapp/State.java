@@ -185,9 +185,9 @@ public final class State {
     /** Simple persisted settings. */
     public static final class Prefs {
         private static Prefs instance;
-        public boolean autoOpen = true;
-        public boolean requireAA = true;
-        public boolean requireBT = true;
+        public boolean autoOpen = false;
+        public boolean requireAA = false;
+        public boolean requireBT = false;
         public int radiusM = 120;
 
         /** How the gate is opened.
@@ -205,7 +205,7 @@ public final class State {
          *  0 = GPS geofence radius only
          *  1 = BLE RSSI threshold only (gate radio says we're at the barrier)
          *  2 = either */
-        public int triggerMode = TRIG_GPS;
+        public int triggerMode = TRIG_EITHER;
         public int rssiTrigDb = -75;    // auto-open when gate radio ≥ this
         public int rssi1m = -55;        // calibrated RSSI at 1 m from the gate
         public boolean trackCsv = true; // write the proximity track log
@@ -237,12 +237,12 @@ public final class State {
         public static void load(Context ctx) {
             SharedPreferences sp = ctx.getSharedPreferences("palgate_car", Context.MODE_PRIVATE);
             Prefs p = get();
-            p.autoOpen = sp.getBoolean("autoOpen", true);
-            p.requireAA = sp.getBoolean("requireAA", true);
-            p.requireBT = sp.getBoolean("requireBT", true);
+            p.autoOpen = sp.getBoolean("autoOpen", false);
+            p.requireAA = sp.getBoolean("requireAA", false);
+            p.requireBT = sp.getBoolean("requireBT", false);
             p.radiusM = sp.getInt("radiusM", 120);
             p.openMode = sp.getInt("openMode", MODE_PAL_NETWORK);
-            p.triggerMode = sp.getInt("triggerMode", TRIG_GPS);
+            p.triggerMode = sp.getInt("triggerMode", TRIG_EITHER);
             p.rssiTrigDb = sp.getInt("rssiTrigDb", -75);
             p.rssi1m = sp.getInt("rssi1m", -55);
             p.trackCsv = sp.getBoolean("trackCsv", true);
@@ -272,17 +272,30 @@ public final class State {
             String cur = sp.getString("mac2gate", "");
             Map<String, String> m = parseMap(cur);
             m.put(mac, gateId);
-            StringBuilder sb = new StringBuilder();
-            for (Map.Entry<String, String> e : m.entrySet()) {
-                if (sb.length() > 0) sb.append(';');
-                sb.append(e.getKey()).append('=').append(e.getValue());
-            }
-            sp.edit().putString("mac2gate", sb.toString()).apply();
+            sp.edit().putString("mac2gate", writeMap(m)).apply();
         }
 
         public static Map<String, String> macMap(Context ctx) {
             return parseMap(ctx.getSharedPreferences("palgate_car", Context.MODE_PRIVATE)
                     .getString("mac2gate", ""));
+        }
+
+        /** Remove a MAC→gate binding (wrong-gate recovery). */
+        public static void unlearnMac(Context ctx, String mac) {
+            SharedPreferences sp = ctx.getSharedPreferences("palgate_car", Context.MODE_PRIVATE);
+            Map<String, String> m = parseMap(sp.getString("mac2gate", ""));
+            if (m.remove(mac) != null) {
+                sp.edit().putString("mac2gate", writeMap(m)).apply();
+            }
+        }
+
+        private static String writeMap(Map<String, String> m) {
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<String, String> e : m.entrySet()) {
+                if (sb.length() > 0) sb.append(';');
+                sb.append(e.getKey()).append('=').append(e.getValue());
+            }
+            return sb.toString();
         }
 
         private static Map<String, String> parseMap(String s) {

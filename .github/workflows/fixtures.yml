@@ -41,5 +41,6 @@ jobs:
             test/stubs/android/util/Log.java \
             src/com/palgate/carapp/GateCrypto.java \
             src/com/palgate/carapp/Gate.java \
+            src/com/palgate/carapp/GateAssoc.java \
             test/GateLocalTest.java
           java -cp out2:tools/json-20240303.jar GateLocalTest

@@ -71,6 +71,7 @@ public final class BleGateOpener {
     // (e.g. failed direct connect → scan fallback) must be ignored
     private int gen;
     private int hintGen = -1;
+    private String targetGateId;   // when set, only this gate's key is ever used
 
     public BleGateOpener(Context ctx, List<Gate> gates, Callback cb) {
         this.ctx = ctx.getApplicationContext();
@@ -102,6 +103,12 @@ public final class BleGateOpener {
      * 15 s discovery scan is most of the open latency. Falls back to a
      * scan if the direct connect fails.
      */
+    /** Open one specific gate: its key, its bound radio, never a guess. */
+    public void openFor(String gateId, String preferredMac) {
+        targetGateId = gateId;
+        open(preferredMac);
+    }
+
     public void open(String preferredMac) {
         BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
         adapter = bm == null ? null : bm.getAdapter();
@@ -213,8 +220,16 @@ public final class BleGateOpener {
         Cand best = null;
         synchronized (candidates) {
             for (Cand c : candidates) {
+                if (targetGateId != null) {
+                    String gid = State.Prefs.macMap(ctx).get(c.mac);
+                    if (gid != null && !gid.equals(targetGateId)) continue; // another gate's radio
+                }
                 if (best == null || c.rssi > best.rssi) best = c;
             }
+        }
+        if (best == null) {
+            done(false, "only radios bound to other gates in range");
+            return;
         }
         connect(best, gen, 15000);
     }
@@ -235,6 +250,10 @@ public final class BleGateOpener {
     // ------------------------------------------------------------- connect --
 
     private Gate pickGate(Cand c) {
+        // 0. explicit target (all monitor opens): always that gate's key
+        if (targetGateId != null) {
+            for (Gate g : gates) if (g.id.equals(targetGateId)) return g;
+        }
         // 1. learned binding
         String gateId = State.Prefs.macMap(ctx).get(c.mac);
         if (gateId != null) {
@@ -317,7 +336,7 @@ public final class BleGateOpener {
             }
             BluetoothGattCharacteristic cl = findChar(g, UUID_CLASSIC);
             if (cl != null) {
-                writeClassic(g, cl, gate);
+                writeClassic(g, cl, gate, cand);
                 return;
             }
             fail(myGen, "neither modern (…1201) nor classic (FFE1) char present");
@@ -333,7 +352,7 @@ public final class BleGateOpener {
                 BluetoothGattCharacteristic cl = findChar(g, UUID_CLASSIC);
                 if (cl != null) {
                     State.get().log("challenge read failed → trying classic FFE1");
-                    writeClassic(g, cl, gate);
+                    writeClassic(g, cl, gate, cand);
                 } else {
                     fail(myGen, "challenge read failed (status " + status + ")");
                     try { g.disconnect(); } catch (Exception ignored) { }
@@ -373,7 +392,7 @@ public final class BleGateOpener {
         }
     }
 
-    private void writeClassic(BluetoothGatt g, BluetoothGattCharacteristic c, Gate gate) {
+    private void writeClassic(BluetoothGatt g, BluetoothGattCharacteristic c, Gate gate, Cand cand) {
         try {
             String clean = gate.id.replaceAll("[^0-9A-Za-z]", "").toUpperCase(Locale.ROOT);
             if (clean.length() > 10) clean = clean.substring(0, 10);
@@ -387,7 +406,7 @@ public final class BleGateOpener {
                 done(false, "writeCharacteristic rejected (classic)");
                 return;
             }
-            State.Prefs.learnMac(ctx, "classic", gate.id);
+            State.Prefs.learnMac(ctx, cand.mac, gate.id);
             done(true, "classic payload written to " + gate.name);
         } catch (Exception e) {
             done(false, "classic error: " + e);

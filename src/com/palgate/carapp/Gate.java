@@ -128,7 +128,7 @@ public class Gate {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject g = arr.getJSONObject(i);
                 out.add(new Gate(g.getString("id"), g.getString("name"),
-                        g.getDouble("lat"), g.getDouble("lng"), g.getString("key"),
+                        g.getDouble("lat"), g.getDouble("lng"), g.optString("key", ""),
                         g.optString("model", "SG304GI"),
                         g.optString("mac", null),
                         g.optString("address", ""),
@@ -147,6 +147,8 @@ public class Gate {
         } catch (Exception e) {
             android.util.Log.e("PalGate", "gates.json load failed", e);
         }
+        mergeRuntimeGates(ctx, out);
+        applyKeyOverrides(ctx, out);
         applyOverrides(ctx, out);
         cache = out;
         cacheRev = rev;
@@ -210,6 +212,140 @@ public class Gate {
                                 g.admin, g.secondaryDevice, g.dialToOpen, g.localOnly));
                         break;
                     }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    // ---- runtime (on-device) gate store ------------------------------------
+    // Gates and BLE keys entered on this phone live in app-private
+    // SharedPreferences (allowBackup=false in the manifest). They are never
+    // baked into the APK and never leave the device.
+
+    private static void bumpRev(Context ctx) {
+        SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        sp.edit().putInt("gate_overrides_rev", sp.getInt("gate_overrides_rev", 0) + 1).apply();
+    }
+
+    /** True when this gate carries a full 16-byte (32 hex) BLE key. */
+    public static boolean hasUsableKey(Gate g) {
+        return g != null && g.keyHex != null && g.keyHex.length() == 32;
+    }
+
+    /** Add or replace a gate entered on-device. Wins over a bundled gate with the same id. */
+    public static void addRuntimeGate(Context ctx, Gate g) {
+        try {
+            SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            JSONArray arr = new JSONArray(sp.getString("runtime_gates", "[]"));
+            JSONObject o = new JSONObject();
+            o.put("id", g.id);
+            o.put("name", g.name);
+            o.put("lat", g.lat);
+            o.put("lng", g.lng);
+            o.put("key", g.keyHex == null ? "" : g.keyHex);
+            o.put("model", g.model == null ? "SG304GI" : g.model);
+            o.put("relay", g.relay == null ? "02" : g.relay);
+            o.put("validUntil", g.validUntil == null ? "2027-10-11T21:00:00.000Z" : g.validUntil);
+            o.put("address", g.address == null ? "" : g.address);
+            if (g.mac != null) o.put("mac", g.mac);
+            JSONArray next = new JSONArray();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject e = arr.getJSONObject(i);
+                if (!g.id.equals(e.optString("id"))) next.put(e);
+            }
+            next.put(o);
+            sp.edit().putString("runtime_gates", next.toString()).apply();
+            bumpRev(ctx);
+        } catch (Exception ignored) {
+        }
+    }
+
+    public static void removeRuntimeGate(Context ctx, String id) {
+        try {
+            SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            JSONArray arr = new JSONArray(sp.getString("runtime_gates", "[]"));
+            JSONArray next = new JSONArray();
+            boolean hit = false;
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject e = arr.getJSONObject(i);
+                if (id.equals(e.optString("id"))) hit = true; else next.put(e);
+            }
+            if (hit) {
+                sp.edit().putString("runtime_gates", next.toString()).apply();
+                bumpRev(ctx);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    public static boolean isRuntimeGate(Context ctx, String id) {
+        try {
+            SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            JSONArray arr = new JSONArray(sp.getString("runtime_gates", "[]"));
+            for (int i = 0; i < arr.length(); i++) {
+                if (id.equals(arr.getJSONObject(i).optString("id"))) return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    /** BLE key for a bundled gate that ships keyless; empty clears. */
+    public static void setKeyOverride(Context ctx, String id, String keyHex) {
+        try {
+            SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            JSONObject root = new JSONObject(sp.getString("gate_key_overrides", "{}"));
+            if (keyHex == null || keyHex.isEmpty()) root.remove(id); else root.put(id, keyHex);
+            sp.edit().putString("gate_key_overrides", root.toString()).apply();
+            bumpRev(ctx);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static Gate fromJson(JSONObject g) {
+        return new Gate(g.optString("id"), g.optString("name", g.optString("id")),
+                g.optDouble("lat", 0), g.optDouble("lng", 0),
+                g.optString("key", ""), g.optString("model", "SG304GI"),
+                g.optString("mac", null), g.optString("address", ""),
+                g.optString("relay", "02"),
+                g.optString("validUntil", "2027-10-11T21:00:00.000Z"));
+    }
+
+    private static void mergeRuntimeGates(Context ctx, List<Gate> out) {
+        try {
+            SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            JSONArray arr = new JSONArray(sp.getString("runtime_gates", "[]"));
+            for (int i = 0; i < arr.length(); i++) {
+                Gate rt = fromJson(arr.getJSONObject(i));
+                if (rt.id == null || rt.id.isEmpty()) continue;
+                boolean replaced = false;
+                for (int j = 0; j < out.size(); j++) {
+                    if (out.get(j).id.equals(rt.id)) {
+                        out.set(j, rt);
+                        replaced = true;
+                        break;
+                    }
+                }
+                if (!replaced) out.add(rt);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void applyKeyOverrides(Context ctx, List<Gate> out) {
+        try {
+            SharedPreferences sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            JSONObject root = new JSONObject(sp.getString("gate_key_overrides", "{}"));
+            if (root.length() == 0) return;
+            for (int i = 0; i < out.size(); i++) {
+                Gate g = out.get(i);
+                String k = root.optString(g.id, "");
+                if (!k.isEmpty()) {
+                    out.set(i, new Gate(g.id, g.name, g.lat, g.lng, k, g.model, g.mac,
+                            g.address, g.relay, g.validUntil, g.posOverridden,
+                            g.type, g.subType, g.firmware, g.outputCount, g.admin,
+                            g.secondaryDevice, g.dialToOpen, g.localOnly));
                 }
             }
         } catch (Exception ignored) {

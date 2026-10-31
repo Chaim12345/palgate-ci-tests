@@ -130,10 +130,15 @@ public final class BleRssiScanner {
 
     // ------------------------------------------------------------ lifecycle --
 
-    /** Called on every qualified fix: decides whether/where to scan. */
+    /** Called on every fix (qualified or not) and on a periodic tick while
+     *  monitoring. distM < 0 means "position unknown": keep scanning whenever
+     *  a BLE trigger is armed, so walk-up detection works with poor or absent
+     *  GPS (parking garage, phone in pocket). */
     public void update(double distM) {
-        boolean want = distM < Math.max(400.0, State.Prefs.get().radiusM * 2.5);
-        nearMode = distM < 150.0;
+        boolean bleTrigger = State.Prefs.get().triggerMode != State.TRIG_GPS;
+        boolean want = distM < 0 ? bleTrigger
+                : distM < Math.max(400.0, State.Prefs.get().radiusM * 2.5);
+        nearMode = distM >= 0 && distM < 150.0;
         if (want && !running) {
             start();
         } else if (!want && running) {

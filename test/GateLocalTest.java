@@ -1,11 +1,14 @@
 import android.content.Context;
 import android.content.SharedPreferences;
 import com.palgate.carapp.Gate;
+import com.palgate.carapp.GateAssoc;
 import com.palgate.carapp.GateCrypto;
 
 import java.io.File;
 import java.io.FileWriter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Android-free behavior tests for Gate.java (fixture loading, defaults,
@@ -44,6 +47,9 @@ public class GateLocalTest {
         testOverrideRoundtrip();
         testGeoMath();
         testModernGateSideRoundtrip();
+        testKeylessBundledGate();
+        testRuntimeGateLayer();
+        testGateAssociation();
         System.out.println(failures == 0 ? "ALL LOCAL TESTS PASS" : failures + " FAILURES");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -162,5 +168,81 @@ public class GateLocalTest {
                     && ptWrong[2] == resp[2] && ptWrong[3] == resp[3];
             check(!wrongEcho, "roundtrip-" + (k + 1) + " wrong key rejected by gate");
         }
+    }
+
+    static void testKeylessBundledGate() throws Exception {
+        File dir = new File("/tmp/gate-local-test-keyless");
+        dir.mkdirs();
+        FileWriter w = new FileWriter(new File(dir, "gates.json"));
+        w.write("{\"gates\":[{\"id\":\"TESTK00001\",\"name\":\"Keyless (SYNTHETIC)\","
+                + "\"lat\":31.0,\"lng\":34.0,\"key\":\"\"}]}");
+        w.close();
+        Context ctx = new Context(dir, prefs(201));
+        Gate g = Gate.load(ctx).get(0);
+        eq(g.keyHex, "", "keyless bundled gate loads with empty key");
+        check(!Gate.hasUsableKey(g), "empty key is not usable");
+        Gate.setKeyOverride(ctx, "TESTK00001", "00112233445566778899AABBCCDDEEFF");
+        Gate g2 = Gate.load(ctx).get(0);
+        check(Gate.hasUsableKey(g2), "runtime key override applies");
+        eq(g2.keyHex, "00112233445566778899AABBCCDDEEFF", "override key value");
+        Gate.setKeyOverride(ctx, "TESTK00001", "");
+        check(!Gate.hasUsableKey(Gate.load(ctx).get(0)), "clearing override restores keyless");
+    }
+
+    static void testRuntimeGateLayer() {
+        SharedPreferences sp = prefs(301);
+        Context ctx = new Context(new File("assets"), sp);
+        check(Gate.load(ctx).size() == 2, "baseline two bundled gates");
+
+        Gate rt = new Gate("TESTR0001", "Runtime (SYNTHETIC)", 32.1, 34.9,
+                "00112233445566778899AABBCCDDEEFF", "SG304GI", null, "", "02",
+                "2027-10-11T21:00:00.000Z");
+        Gate.addRuntimeGate(ctx, rt);
+        List<Gate> gates = Gate.load(ctx);
+        check(gates.size() == 3, "runtime gate appended");
+        Gate last = gates.get(2);
+        eq(last.id, "TESTR0001", "runtime gate id");
+        check(Gate.isRuntimeGate(ctx, "TESTR0001"), "isRuntimeGate true");
+        check(!Gate.isRuntimeGate(ctx, "TEST000001"), "bundled not flagged runtime");
+        check(Gate.hasUsableKey(last), "runtime gate key usable");
+
+        // runtime gate replaces bundled gate with same id
+        Gate ov = new Gate("TEST000001", "Replaced (SYNTHETIC)", 33.0, 35.0,
+                "FFEEDDCCBBAA99887766554433221100", "SG304GI", null, "", "02",
+                "2027-10-11T21:00:00.000Z");
+        Gate.addRuntimeGate(ctx, ov);
+        gates = Gate.load(ctx);
+        check(gates.size() == 3, "same-id runtime gate replaces, not appends");
+        eq(gates.get(0).name, "Replaced (SYNTHETIC)", "bundled gate replaced by runtime twin");
+        close(gates.get(0).lat, 33.0, 1e-12, "runtime twin position");
+
+        Gate.removeRuntimeGate(ctx, "TEST000001");
+        gates = Gate.load(ctx);
+        eq(gates.get(0).name.contains("Test Gate A") ? "A" : "B", "A", "bundled restored after remove");
+        Gate.removeRuntimeGate(ctx, "TESTR0001");
+        check(Gate.load(ctx).size() == 2, "remove returns to baseline");
+    }
+
+    static void testGateAssociation() {
+        Context ctx = new Context(new File("assets"), prefs(401));
+        List<Gate> gates = Gate.load(ctx);
+        Map<String, String> bind = new HashMap<String, String>();
+        bind.put("02:11:22:33:44:55", "TEST000001");
+        bind.put("02:66:77:88:99:AA", "TEST000002");
+
+        Gate g = GateAssoc.boundGate(bind, gates, "02:11:22:33:44:55");
+        check(g != null && g.id.equals("TEST000001"), "bound mac resolves its gate");
+        check(GateAssoc.boundGate(bind, gates, "02:AA:BB:CC:DD:EE") == null,
+                "unknown mac resolves nothing");
+        check(GateAssoc.boundGate(bind, gates, "") == null, "empty mac resolves nothing");
+
+        check(GateAssoc.mayAutoOpen(bind, gates, "02:11:22:33:44:55", gates.get(0)),
+                "bound radio may auto-open its own gate");
+        check(!GateAssoc.mayAutoOpen(bind, gates, "02:66:77:88:99:AA", gates.get(0)),
+                "radio bound to gate 2 may NOT auto-open gate 1");
+        check(!GateAssoc.mayAutoOpen(bind, gates, "02:AA:BB:CC:DD:EE", gates.get(0)),
+                "unbound radio may NOT auto-open anything");
+        check(!GateAssoc.mayAutoOpen(bind, gates, "02:11:22:33:44:55", null),
+                "null target never auto-opens");
     }
 }

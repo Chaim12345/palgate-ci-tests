@@ -98,7 +98,8 @@ public class GateMonitorService extends Service {
 
     private final Runnable stopCheck = new Runnable() {
         @Override public void run() {
-            if (!State.get().aaConnected && !State.get().testMode) {
+            if (!State.get().aaConnected && !State.get().testMode
+                    && State.Prefs.get().requireAA) {
                 State.get().log("car session gone → stopping monitor");
                 stopSelf();
             }
@@ -134,7 +135,7 @@ public class GateMonitorService extends Service {
             return START_NOT_STICKY;
         }
         if (ACTION_OPEN_NOW.equals(action)) {
-            manualOpen();
+            manualOpen(intent.getStringExtra("gateId"));
             // fallthrough: keep running (or start properly below if not yet)
         }
         if (!listening) {
@@ -236,6 +237,9 @@ public class GateMonitorService extends Service {
         requestLocations();
 
         registerCarBtWatcher();
+        if (State.Prefs.get().triggerMode != State.TRIG_GPS && scanner != null) {
+            scanner.update(-1);   // walk-up: the radio must not wait for a GPS fix
+        }
         h.postDelayed(statusTicker, 10000);
         State.get().log("monitor started: " + gates.size() + " gate(s), radius "
                 + State.Prefs.get().radiusM + " m"
@@ -340,8 +344,14 @@ public class GateMonitorService extends Service {
         @Override public void run() {
             refreshNotification();
             GateWidgetProvider.push(GateMonitorService.this);
-            // auto-stop when the car session is gone (unless phone-side test mode)
-            if (!State.get().aaConnected && !State.get().testMode) {
+            if (scanner != null && !scanner.isRunning()
+                    && State.Prefs.get().triggerMode != State.TRIG_GPS) {
+                scanner.update(-1);
+            }
+            // auto-stop when the car session is gone (unless phone-side test mode
+            // or the user dropped the Android Auto requirement for walk-up use)
+            if (!State.get().aaConnected && !State.get().testMode
+                    && State.Prefs.get().requireAA) {
                 h.removeCallbacks(stopCheck);
                 h.postDelayed(stopCheck, 90000);   // grace: nav may re-open us
             }
@@ -390,14 +400,9 @@ public class GateMonitorService extends Service {
         boolean qualified = acc <= Math.max(40f, radius * 0.5f)
                 && fixTime > now - 15000L;
         s.fixQualified = qualified;
-        if (!qualified) {
-            skipLogOnce(String.format(Locale.ROOT,
-                    "coarse fix ignored (±%.0f m, %s) — waiting for GPS", acc, provider));
-            State.get().notifyListeners();
-            return;
-        }
 
-        // ---- nearest gate, raw distance
+        // ---- nearest gate, raw distance (from ANY fix: the gate radio must
+        //      not wait for a geofence-qualified fix)
         Gate nearest = null;
         double raw = Double.MAX_VALUE;
         for (Gate gate : gates) {
@@ -406,6 +411,13 @@ public class GateMonitorService extends Service {
                 raw = d;
                 nearest = gate;
             }
+        }
+        if (scanner != null) scanner.update(raw == Double.MAX_VALUE ? -1 : raw);
+        if (!qualified) {
+            skipLogOnce(String.format(Locale.ROOT,
+                    "coarse fix ignored (±%.0f m, %s) — waiting for GPS", acc, provider));
+            State.get().notifyListeners();
+            return;
         }
 
         // ---- smoothing with GPS-teleport damping
@@ -466,8 +478,7 @@ public class GateMonitorService extends Service {
             s.phase = s.inRange ? State.PHASE_ARMED : State.PHASE_IDLE;
         }
 
-        // ---- gate radio lifecycle + staleness
-        if (scanner != null) scanner.update(distSm);
+        // ---- gate radio staleness
         if (s.rssi != 127 && s.rssiAtMs > 0 && now - s.rssiAtMs > 10000) {
             s.rssi = 127;
             s.rssiEstM = -1;
@@ -481,7 +492,7 @@ public class GateMonitorService extends Service {
 
         // ---- auto-open retry on EVERY qualified fix while armed
         if (s.inRange && s.phase == State.PHASE_ARMED) {
-            maybeAutoOpen("gps", acc, speed);
+            maybeAutoOpen("gps", acc, speed, nearest);
         }
 
         csv("fix");
@@ -503,9 +514,13 @@ public class GateMonitorService extends Service {
 
     // ------------------------------------------------------------ triggers --
 
-    private void maybeAutoOpen(String reason, float acc, float speed) {
+    private void maybeAutoOpen(String reason, float acc, float speed, Gate target) {
         State s = State.get();
         State.Prefs p = State.Prefs.get();
+        if (target == null) {
+            skipLogOnce("no gate resolved for this trigger — not opening");
+            return;
+        }
         if (!p.autoOpen) {
             skipLogOnce("auto-open disabled — manual only");
             return;
@@ -547,7 +562,7 @@ public class GateMonitorService extends Service {
             return;
         }
         skipLogOnce(null);
-        runOpen(reason);
+        runOpen(reason, target);
     }
 
     private final BleRssiScanner.Listener rssiListener = new BleRssiScanner.Listener() {
@@ -561,6 +576,19 @@ public class GateMonitorService extends Service {
             s.rssiAtMs = System.currentTimeMillis();
             State.Prefs p = State.Prefs.get();
             if (p.triggerMode != State.TRIG_GPS && !rssiFired && rssi >= p.rssiTrigDb) {
+                // Wrong-gate guard: the radio must be bound to a gate on this
+                // phone. PalGate units share service UUIDs, so a neighbor's
+                // gate (or the second gate 3 m away) looks identical until
+                // bound; unbound radios never trigger an open.
+                Gate bound = GateAssoc.boundGate(
+                        State.Prefs.macMap(GateMonitorService.this), gates, mac);
+                if (bound == null) {
+                    State.get().log(String.format(Locale.ROOT,
+                            "gate radio %d dBm ≥ trigger but %s is unbound — not auto-opening (bind it under GATES)",
+                            rssi, mac));
+                    State.get().notifyListeners();
+                    return;
+                }
                 if (!p.autoOpen || !s.conditionsMet() || s.bleBusy) {
                     State.get().notifyListeners();
                     return;
@@ -573,10 +601,10 @@ public class GateMonitorService extends Service {
                 rssiFired = true;
                 rssiFiredAtMs = System.currentTimeMillis();
                 State.get().log(String.format(Locale.ROOT,
-                        "gate radio %d dBm ≥ %d dBm trigger (≈%.0f m) — auto open",
-                        rssi, p.rssiTrigDb, estM));
+                        "gate radio %d dBm ≥ %d dBm trigger (≈%.0f m) — auto open %s",
+                        rssi, p.rssiTrigDb, estM, bound.name));
                 csv("rssi-trig");
-                maybeAutoOpen("ble", s.accuracy, s.speed);
+                maybeAutoOpen("ble", s.accuracy, s.speed, bound);
             }
             State.get().notifyListeners();
         }
@@ -593,33 +621,44 @@ public class GateMonitorService extends Service {
 
     // ---------------------------------------------------------------- open --
 
-    private void manualOpen() {
+    private void manualOpen(String gateId) {
         if (State.get().bleBusy) {
             State.get().log("open already in flight");
             return;
         }
-        runOpen("manual");
+        Gate target = null;
+        if (gateId != null) {
+            for (Gate g : gates) {
+                if (g.id.equals(gateId)) {
+                    target = g;
+                    break;
+                }
+            }
+        }
+        if (target == null) {
+            target = State.get().nearest != null ? State.get().nearest
+                    : (gates.isEmpty() ? null : gates.get(0));
+        }
+        runOpen("manual", target);
     }
 
-    /** MAC we already know belongs to the nearest gate (radio-visible or learned). */
-    private String hintMac() {
+    /** MAC already proven to belong to the target gate (bound + radio-visible,
+     *  or bound from an earlier open). Unbound sightings are never used. */
+    private String hintMac(Gate target) {
+        if (target == null) return null;
         State s = State.get();
         long age = System.currentTimeMillis() - s.rssiAtMs;
         if (s.rssi < 127 && !s.rssiMac.isEmpty() && age < 15000) {
             String gid = State.Prefs.macMap(this).get(s.rssiMac);
-            if (gid == null || s.nearest == null || gid.equals(s.nearest.id)) {
-                return s.rssiMac;
-            }
+            if (target.id.equals(gid)) return s.rssiMac;
         }
-        if (s.nearest != null) {
-            for (Map.Entry<String, String> e : State.Prefs.macMap(this).entrySet()) {
-                if (e.getValue().equals(s.nearest.id)) return e.getKey();
-            }
+        for (Map.Entry<String, String> e : State.Prefs.macMap(this).entrySet()) {
+            if (e.getValue().equals(target.id)) return e.getKey();
         }
         return null;
     }
 
-    private void runOpen(final String why) {
+    private void runOpen(final String why, final Gate target) {
         final State s = State.get();
 
         // TEST BUILD ONLY (build-time marker, see GateSafety): never actuate.
@@ -640,8 +679,6 @@ public class GateMonitorService extends Service {
 
         // ---- delegate modes: fire PalGate's own widget open broadcast ----
         if (mode != State.Prefs.MODE_DIRECT_BLE) {
-            final Gate target = s.nearest != null ? s.nearest
-                    : (gates.isEmpty() ? null : gates.get(0));
             if (target == null) {
                 s.phase = State.PHASE_FAILED;
                 s.phaseDetail = "no gate configured";
@@ -677,9 +714,27 @@ public class GateMonitorService extends Service {
         }
 
         // ---- direct BLE mode (offline path) ----
+        if (target == null) {
+            s.phase = State.PHASE_FAILED;
+            s.phaseDetail = "no gate configured";
+            State.get().log("✘ OPEN FAILED — no gate configured");
+            refreshNotification();
+            GateWidgetProvider.push(this);
+            return;
+        }
+        if (!Gate.hasUsableKey(target)) {
+            s.phase = State.PHASE_FAILED;
+            s.phaseDetail = "no BLE key for " + target.name;
+            State.get().log("✘ OPEN FAILED — no BLE key stored for " + target.name
+                    + " — add it under GATES in the app (or pick a PalGate-app mode)");
+            csv("open-" + why + "-nokey");
+            refreshNotification();
+            GateWidgetProvider.push(this);
+            return;
+        }
         s.bleBusy = true;
         s.phase = State.PHASE_OPENING;
-        s.phaseDetail = why + " open";
+        s.phaseDetail = why + " open " + target.name;
         refreshNotification();
         GateWidgetProvider.push(this);
         if (scanner != null) scanner.pause();     // don't fight the GATT connect
@@ -692,16 +747,20 @@ public class GateMonitorService extends Service {
                 st.phaseDetail = detail;
                 if (ok) {
                     st.lastOpenAtMs = System.currentTimeMillis();
-                    st.lastOpenGateId = st.nearest == null ? "" : st.nearest.id;
+                    st.lastOpenGateId = target.id;
                 }
-                st.log((ok ? "✔ OPEN OK — " : "✘ OPEN FAILED — ") + detail);
+                // Honest result: a no-response BLE write can never confirm the
+                // barrier moved — say what we know, not "OPEN OK".
+                st.log(ok ? "✔ OPEN COMMAND SENT — " + detail
+                        + " (BLE gives no open confirmation — watch the gate)"
+                        : "✘ OPEN FAILED — " + detail);
                 csv("open-" + (ok ? "ok" : "fail"));
                 refreshNotification();
                 GateWidgetProvider.push(GateMonitorService.this);
                 if (scanner != null) scanner.resume();
             }
         });
-        opener.open(hintMac());   // known MAC → skip the 15 s discovery scan
+        opener.openFor(target.id, hintMac(target));   // bound MAC → skip the 15 s discovery scan
     }
 
     // ------------------------------------------------------------ track log --

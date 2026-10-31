@@ -44,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Phone-side UI v1.2 — permission bootstrap, settings, manual open, status,
@@ -133,7 +134,7 @@ public class PhoneActivity extends Activity implements State.Listener {
         TextView sub = new TextView(this);
         sub.setText("Opens via the official PalGate app's widget command (network), "
                 + "or direct BLE with the cached key. No server of ours, no login of ours.\n"
-                + "v1.2 precision: GPS±, closing speed, gate-radio RSSI, calibration, track CSV.");
+                + "v1.3: auto-open starts OFF — test detection first. Walk-up needs no car connection. Radio trigger fires only for a bound gate radio.");
         sub.setPadding(0, dp(2), 0, dp(10));
         root.addView(sub);
 
@@ -305,20 +306,85 @@ public class PhoneActivity extends Activity implements State.Listener {
         });
 
         // ------------------------------------------- gates + calibration --
-        root.addView(label("GATES — calibrate position ON SITE for exact distances"));
+        root.addView(label("GATES — bundled gates ship keyless; keys you enter stay on this phone (private storage, backup off)"));
+        final Map<String, String> bindings = State.Prefs.macMap(this);
+        final State stNow = State.get();
+        final boolean freshRadio = stNow.rssi < 127 && !stNow.rssiMac.isEmpty()
+                && System.currentTimeMillis() - stNow.rssiAtMs < 30000;
         for (final Gate g : Gate.load(this)) {
             boolean ov = Gate.hasOverride(this, g.id);
+            final boolean rt = Gate.isRuntimeGate(this, g.id);
+            String boundMac = null;
+            for (Map.Entry<String, String> e : bindings.entrySet()) {
+                if (e.getValue().equals(g.id)) boundMac = e.getKey();
+            }
+            final String boundMacF = boundMac;
             TextView info = new TextView(this);
             info.setText(String.format(Locale.ROOT,
-                    "%s · %s%n  %s%.6f, %.6f%s",
-                    g.name, g.id,
-                    ov ? "⌖ calibrated: " : "cloud: ",
-                    g.lat, g.lng,
-                    ov ? "" : String.format(Locale.ROOT, " · key %s…", g.keyHex.substring(0, 6))));
+                    "%s · %s · %s%n  %s%.6f, %.6f%n  BLE key: %s · radio: %s",
+                    g.name, g.id, rt ? "on-device" : "bundled",
+                    ov ? "⌖ calibrated: " : "cloud: ", g.lat, g.lng,
+                    Gate.hasUsableKey(g) ? "set ✓" : "missing (PalGate-app network mode still works)",
+                    boundMac == null ? "unbound" : boundMac));
             info.setTypeface(Typeface.MONOSPACE);
             info.setTextSize(11);
             info.setPadding(0, dp(8), 0, dp(2));
             root.addView(info);
+
+            Button openG = new Button(this);
+            openG.setText("OPEN " + g.name + " NOW");
+            openG.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { svcOpen(g.id); }
+            });
+            root.addView(openG);
+
+            final EditText edKey = new EditText(this);
+            edKey.setHint("BLE key (32 hex) for " + g.name);
+            edKey.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+            root.addView(edKey);
+            Button setKey = new Button(this);
+            setKey.setText("save BLE key for " + g.name);
+            setKey.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    String k = edKey.getText().toString().trim();
+                    if (!k.matches("(?i)[0-9a-f]{32}")) {
+                        toast("key must be 32 hex chars (16 bytes)");
+                        return;
+                    }
+                    Gate.setKeyOverride(PhoneActivity.this, g.id, k.toUpperCase(Locale.ROOT));
+                    State.get().log("BLE key saved on-device for " + g.name);
+                    toast("key saved for " + g.name + " (stays on this phone)");
+                    recreate();
+                }
+            });
+            root.addView(setKey);
+
+            if (freshRadio && !stNow.rssiMac.equals(boundMacF)) {
+                Button bind = new Button(this);
+                bind.setText("bind seen radio " + stNow.rssiMac + " → " + g.name);
+                bind.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        State.Prefs.learnMac(PhoneActivity.this, stNow.rssiMac, g.id);
+                        State.get().log("radio " + stNow.rssiMac + " bound to " + g.name);
+                        toast("bound — this radio now triggers " + g.name);
+                        recreate();
+                    }
+                });
+                root.addView(bind);
+            }
+            if (boundMac != null) {
+                Button unbind = new Button(this);
+                unbind.setText("unbind radio " + boundMacF);
+                unbind.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        State.Prefs.unlearnMac(PhoneActivity.this, boundMacF);
+                        State.get().log("radio " + boundMacF + " unbound from " + g.name);
+                        recreate();
+                    }
+                });
+                root.addView(unbind);
+            }
 
             Button cap = new Button(this);
             cap.setText(String.format(Locale.ROOT,
@@ -340,7 +406,97 @@ public class PhoneActivity extends Activity implements State.Listener {
                 });
                 root.addView(rst);
             }
+            if (rt) {
+                Button rm = new Button(this);
+                rm.setText("remove on-device gate " + g.name);
+                rm.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        Gate.removeRuntimeGate(PhoneActivity.this, g.id);
+                        State.get().log("on-device gate " + g.name + " removed");
+                        recreate();
+                    }
+                });
+                root.addView(rm);
+            }
         }
+
+        // ---------------------------------------------------- add a gate --
+        root.addView(label("ADD GATE ON THIS PHONE — from your own PalGate account details"));
+        final EditText edId = new EditText(this);
+        edId.setHint("gate id (e.g. 4G…)");
+        final EditText edName = new EditText(this);
+        edName.setHint("name (e.g. Gate 1)");
+        final EditText edNKey = new EditText(this);
+        edNKey.setHint("BLE key, 32 hex (optional)");
+        final EditText edLat = new EditText(this);
+        edLat.setHint("latitude (or use GPS fix)");
+        final EditText edLng = new EditText(this);
+        edLng.setHint("longitude (or use GPS fix)");
+        final EditText edRelay = new EditText(this);
+        edRelay.setHint("relay (default 02)");
+        root.addView(edId);
+        root.addView(edName);
+        root.addView(edNKey);
+        root.addView(edLat);
+        root.addView(edLng);
+        root.addView(edRelay);
+        Button useFix = new Button(this);
+        useFix.setText("use last GPS fix for position");
+        useFix.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                State s = State.get();
+                if (!s.hasFix) {
+                    toast("no GPS fix yet");
+                    return;
+                }
+                edLat.setText(String.format(Locale.ROOT, "%.6f", s.lat));
+                edLng.setText(String.format(Locale.ROOT, "%.6f", s.lng));
+            }
+        });
+        root.addView(useFix);
+        Button add = new Button(this);
+        add.setText("ADD GATE");
+        add.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                String id = edId.getText().toString().trim();
+                String name = edName.getText().toString().trim();
+                String key = edNKey.getText().toString().trim();
+                String relay = edRelay.getText().toString().trim();
+                if (id.isEmpty() || id.contains(";") || id.contains("=")) {
+                    toast("gate id required (no ; or =)");
+                    return;
+                }
+                if (!key.isEmpty() && !key.matches("(?i)[0-9a-f]{32}")) {
+                    toast("key must be 32 hex chars, or leave empty");
+                    return;
+                }
+                double lat, lng;
+                try {
+                    lat = Double.parseDouble(edLat.getText().toString().trim());
+                    lng = Double.parseDouble(edLng.getText().toString().trim());
+                } catch (NumberFormatException e) {
+                    State s2 = State.get();
+                    if (!s2.hasFix) {
+                        toast("enter coordinates or tap USE LAST GPS FIX");
+                        return;
+                    }
+                    lat = s2.lat;
+                    lng = s2.lng;
+                }
+                if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+                    toast("bad coordinates");
+                    return;
+                }
+                Gate g = new Gate(id, name.isEmpty() ? id : name, lat, lng,
+                        key.toUpperCase(Locale.ROOT), "SG304GI", null, "",
+                        relay.isEmpty() ? "02" : relay, "2027-10-11T21:00:00.000Z");
+                Gate.addRuntimeGate(PhoneActivity.this, g);
+                State.get().log("gate " + g.name + " (" + g.id + ") added on-device");
+                toast("added " + g.name);
+                recreate();
+            }
+        });
+        root.addView(add);
 
         // ----------------------------------------------------------- data --
         root.addView(label("MEASUREMENT DATA"));
@@ -414,6 +570,21 @@ public class PhoneActivity extends Activity implements State.Listener {
         t.setTextSize(11);
         t.setPadding(0, dp(10), 0, dp(2));
         return t;
+    }
+
+    private void svcOpen(String gateId) {
+        Intent i = new Intent(this, GateMonitorService.class);
+        i.setAction(GateMonitorService.ACTION_OPEN_NOW);
+        if (gateId != null) i.putExtra("gateId", gateId);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                startForegroundService(i);
+            } else {
+                startService(i);
+            }
+        } catch (Exception e) {
+            toast("could not start service: " + e.getClass().getSimpleName());
+        }
     }
 
     private void svc(String action) {
