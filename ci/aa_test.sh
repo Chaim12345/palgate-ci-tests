@@ -86,6 +86,14 @@ shot 01_palgate_phone
 ui_has "PalGate" && note "PalGate phone UI visible" || true
 
 echo "-- gate: widget hosted render + OPEN dispatch (WidgetHostTest) --"
+# car-compat source guard: widget taps must be service/broadcast PendingIntents only -
+# the Android Auto widget host blocks activity launches ("can't be accessed ... at this time")
+if grep -q "PendingIntent.getActivity" src/com/palgate/carapp/GateWidgetProvider.java; then
+  gate_block "GateWidgetProvider uses PendingIntent.getActivity - AA car-widget host blocks activity launches"; row widget_noactivity gate fail "source"
+else
+  note "widget taps use service/broadcast PendingIntents only (car-host compatible)"; row widget_noactivity gate executed "source grep GateWidgetProvider"
+fi
+
 if [ -f widgethost/WidgetHostTest.apk ]; then
   adb install -r widgethost/WidgetHostTest.apk >/dev/null 2>&1
   adb shell appwidget grantbind --package com.palgate.widgethost >/dev/null 2>&1 || true

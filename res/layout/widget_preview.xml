@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static picker preview (API 31+). Mirrors widget_gate.xml with placeholder
+     content so the Android Auto / launcher picker shows a realistic card. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="10dp">
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="PalGate"
+        android:textColor="@color/widget_title"
+        android:textStyle="bold"
+        android:textSize="13sp"/>
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:textColor="@color/widget_text"
+        android:textSize="12sp"
+        android:text="Gate status"/>
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:gravity="center"
+        android:text="OPEN GATE"
+        android:textColor="@color/widget_btn_text"
+        android:textStyle="bold"
+        android:textSize="13sp"
+        android:background="@drawable/widget_btn"/>
+</LinearLayout>
