@@ -14,6 +14,12 @@ OUT="$SRC/out"
 rm -rf "$OUT"
 mkdir -p "$OUT/classes" "$OUT/gen" "$OUT/compiled-res" "$OUT/dex"
 
+if [ "${TEST_BUILD:-0}" = "1" ]; then
+  echo "ci-test-build" > "$SRC/assets/test_build.marker"
+  trap 'rm -f "$SRC/assets/test_build.marker"' EXIT
+  echo "== TEST_BUILD=1: actuation-disabled marker injected =="
+fi
+
 echo "== 1/6 aapt2 compile resources =="
 "$BT/aapt2" compile --dir "$SRC/res" -o "$OUT/compiled-res"
 

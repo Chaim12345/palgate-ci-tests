@@ -41,6 +41,7 @@ jobs:
       - name: Fetch androidx deps and build APK
         env:
           ECJ_JAR: ${{ github.workspace }}/tools/ecj.jar
+          TEST_BUILD: '1'
         run: |
           python3 fetch_deps.py
           python3 extract_cp.py
@@ -69,6 +70,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Run Android Auto + widget tests
+        env:
+          RUN_DHU: ${{ (contains(github.event.head_commit.message, '[dhu]') || github.event_name == 'workflow_dispatch') && '1' || '0' }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30

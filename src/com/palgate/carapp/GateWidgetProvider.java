@@ -49,11 +49,12 @@ public class GateWidgetProvider extends AppWidgetProvider {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         v.setOnClickPendingIntent(R.id.w_open, pi);
 
-        // Root tap starts/refreshes monitoring (service action, no activity launch).
-        // Activity launches are blocked by car widget hosts; service actions work
-        // on both phone home screens and Android Auto's widget panel.
+        // Root tap refreshes the widget (service action, no activity launch, no
+        // monitoring start - so no geofence/auto-open side effect). Activity
+        // launches are blocked by car widget hosts; service actions work on both
+        // phone home screens and Android Auto's widget panel.
         Intent start = new Intent(ctx, GateMonitorService.class);
-        start.setAction(GateMonitorService.ACTION_START);
+        start.setAction(GateMonitorService.ACTION_REFRESH);
         PendingIntent piApp = PendingIntent.getForegroundService(ctx, 2, start,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         v.setOnClickPendingIntent(R.id.w_root, piApp);

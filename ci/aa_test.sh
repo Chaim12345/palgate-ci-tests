@@ -94,9 +94,13 @@ if [ -f widgethost/WidgetHostTest.apk ]; then
   adb logcat -d -s WidgetHostTest:I > "$ART/widgethost.log" 2>/dev/null || true
   adb logcat -d | grep -i 'SYNTHETIC-DISPATCH' > "$ART/synthetic_dispatch.log" 2>/dev/null || true
   shot 20_widgethost
-  if grep -q 'HOST-RESULT: OPEN-TAPPED' "$ART/widgethost.log" && [ -s "$ART/synthetic_dispatch.log" ]; then
-    note "widget hosted render + OPEN tap recorded synthetic dispatch (no BLE, no broadcast)"
-    row widgethost gate executed "widgethost.log + synthetic_dispatch.log + 20_widgethost.png"
+  # negative assertions: the tap must produce NO actuation attempt anywhere
+  adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/actuation_attempts.log" 2>/dev/null || true
+  if grep -q 'HOST-RESULT: OPEN-TAPPED' "$ART/widgethost.log" && [ -s "$ART/synthetic_dispatch.log" ] && [ ! -s "$ART/actuation_attempts.log" ]; then
+    note "widget hosted render + OPEN tap recorded synthetic dispatch; zero BLE/broadcast actuation attempts"
+    row widgethost gate executed "widgethost.log + synthetic_dispatch.log + empty actuation_attempts.log + 20_widgethost.png"
+  elif [ -s "$ART/actuation_attempts.log" ]; then
+    gate_block "actuation attempt detected after widget OPEN tap: $(head -2 "$ART/actuation_attempts.log")"; row widgethost gate fail "actuation_attempts.log"
   elif grep -q 'HOST-RESULT' "$ART/widgethost.log"; then
     gate_block "widget host: $(tail -1 "$ART/widgethost.log")"; row widgethost gate fail "widgethost.log"
   else
@@ -169,6 +173,7 @@ else
   HUS=0
 fi
 
+if [ "${RUN_DHU:-1}" = "1" ]; then
 echo "-- gate: DHU reference projection --"
 DHU="${ANDROID_HOME:-/usr/local/lib/android/sdk}/extras/google/auto/desktop-head-unit"
 if [ "$HUS" = 1 ] && [ -x "$DHU" ]; then
@@ -215,6 +220,11 @@ if [ "$HUS" = 1 ] && [ -x "$DHU" ]; then
 else
   [ "$HUS" = 1 ] || { opt "DHU skipped: no head unit server"; row dhu gate gate-blocked "no HUS"; }
   [ -x "$DHU" ] || { gate_block "DHU binary missing at $DHU"; row dhu gate gate-blocked "binary missing"; }
+fi
+
+else
+  opt "DHU stage skipped (known blocked; include [dhu] in the commit message or run manually to re-attempt)"
+  row dhu gate skipped "RUN_DHU=0"
 fi
 
 echo "-- optional: Open Headunit self-mode (experimental) --"

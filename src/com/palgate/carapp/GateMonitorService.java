@@ -65,6 +65,7 @@ public class GateMonitorService extends Service {
     public static final String ACTION_START = "com.palgate.carapp.START";
     public static final String ACTION_STOP = "com.palgate.carapp.STOP";
     public static final String ACTION_OPEN_NOW = "com.palgate.carapp.OPEN_NOW";
+    public static final String ACTION_REFRESH = "com.palgate.carapp.REFRESH";
     private static final String CHANNEL_ID = "palgate_car";
     private static final int NOTIF_ID = 42;
     private static final long OPEN_COOLDOWN_MS = 45000;
@@ -123,6 +124,13 @@ public class GateMonitorService extends Service {
         String action = intent == null ? ACTION_START : intent.getAction();
         if (ACTION_STOP.equals(action)) {
             stopSelf();
+            return START_NOT_STICKY;
+        }
+        if (ACTION_REFRESH.equals(action)) {
+            // Widget root tap: refresh state display only. Never starts
+            // monitoring here, so no geofence/auto-open side effects.
+            GateWidgetProvider.push(this);
+            if (!listening) stopSelf();
             return START_NOT_STICKY;
         }
         if (ACTION_OPEN_NOW.equals(action)) {
@@ -614,23 +622,18 @@ public class GateMonitorService extends Service {
     private void runOpen(final String why) {
         final State s = State.get();
 
-        // SAFETY: a build whose fixtures are ALL synthetic (every gate id has the
-        // TEST prefix) must never actuate anything - no BLE, no delegate broadcast
-        // to the official PalGate app. Record the dispatch for tests instead.
-        if (!gates.isEmpty()) {
-            boolean allSynthetic = true;
-            for (Gate g : gates) {
-                if (g.id == null || !g.id.startsWith("TEST")) { allSynthetic = false; break; }
-            }
-            if (allSynthetic) {
-                Log.i("PalGate", "SYNTHETIC-DISPATCH " + why + " open requested"
-                        + " (fixture-only build: no BLE, no delegate broadcast)");
-                s.log("SYNTHETIC-DISPATCH " + why + " open (fixture-only build; nothing actuated)");
-                csv("open-" + why + "-synthetic");
-                refreshNotification();
-                GateWidgetProvider.push(this);
-                return;
-            }
+        // TEST BUILD ONLY (build-time marker, see GateSafety): never actuate.
+        // runOpen is the single choke point for every open path (manual widget/
+        // notification opens, GPS/BLE auto-open, direct BLE and PalGate delegate
+        // modes) - nothing below runs in a test build.
+        if (GateSafety.isTestBuild(this)) {
+            Log.i("PalGate", "SYNTHETIC-DISPATCH " + why + " open requested"
+                    + " (test build: BLE + delegate broadcast disabled at dispatcher)");
+            s.log("SYNTHETIC-DISPATCH " + why + " open (test build; nothing actuated)");
+            csv("open-" + why + "-synthetic");
+            refreshNotification();
+            GateWidgetProvider.push(this);
+            return;
         }
 
         int mode = State.Prefs.get().openMode;

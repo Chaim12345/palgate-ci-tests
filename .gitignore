@@ -9,3 +9,4 @@ PalGateCar.apk.idsig
 !tools/*.jar
 out/
 out2/
+assets/test_build.marker
