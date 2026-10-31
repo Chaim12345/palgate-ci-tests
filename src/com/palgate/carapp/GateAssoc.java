@@ -46,15 +46,18 @@ public final class GateAssoc {
      * phone; anything else must be refused so the user picks the gate
      * explicitly in the app. A single configured gate keeps the old
      * nearest-gate behavior regardless of distance.
+     *
+     * hasFreshQualifiedFix must be false for a stale or coarse fix, so an
+     * old/inaccurate position can never pick the gate.
      */
-    public static int resolveManual(List<Gate> gates, boolean hasFix, double lat, double lng,
+    public static int resolveManual(List<Gate> gates, boolean hasFreshQualifiedFix, double lat, double lng,
                                     double rangeM, Gate[] out) {
         if (gates == null || gates.isEmpty()) return RESOLVE_NONE;
         if (gates.size() == 1) {
             if (out != null && out.length > 0) out[0] = gates.get(0);
             return RESOLVE_ONE;
         }
-        if (!hasFix) return RESOLVE_AMBIGUOUS;
+        if (!hasFreshQualifiedFix) return RESOLVE_AMBIGUOUS;
         Gate inRange = null;
         int count = 0;
         for (Gate g : gates) {

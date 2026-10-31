@@ -27,6 +27,7 @@ import android.os.Looper;
 
 import java.io.File;
 import java.io.FileWriter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -94,7 +95,9 @@ public class GateMonitorService extends Service {
     private String lastSkipReason = "";
     private boolean rssiFired;
     private long rssiFiredAtMs;
-    private long lastMotionAtMs;
+    /** Recent qualified fixes, for per-gate closing velocity (approach proof). */
+    private static final class FixPt { long t; double lat; double lng; }
+    private final ArrayList<FixPt> fixHist = new ArrayList<>();
     private long lastCsvRowAt;
 
     private final Runnable stopCheck = new Runnable() {
@@ -414,6 +417,12 @@ public class GateMonitorService extends Service {
             }
         }
         if (scanner != null) scanner.update(raw == Double.MAX_VALUE ? -1 : raw);
+        if (qualified) {
+            FixPt pt = new FixPt();
+            pt.t = now; pt.lat = lat; pt.lng = lng;
+            fixHist.add(pt);
+            while (fixHist.size() > 2 && now - fixHist.get(0).t > 45000) fixHist.remove(0);
+        }
         if (!qualified) {
             skipLogOnce(String.format(Locale.ROOT,
                     "coarse fix ignored (±%.0f m, %s) — waiting for GPS", acc, provider));
@@ -438,7 +447,6 @@ public class GateMonitorService extends Service {
             float v = (float) ((lastSmForClosing - distSm) / dt);
             closingEwma = closingEwma == 0f ? v : closingEwma * 0.6f + v * 0.4f;
         }
-        if (speed > 0.5f || closingEwma > 0.5f) lastMotionAtMs = now;
         lastSmForClosing = distSm;
         float eta = closingEwma > 0.8f && distSm > radius
                 ? (float) ((distSm - radius) / closingEwma) : -1f;
@@ -516,6 +524,23 @@ public class GateMonitorService extends Service {
 
     // ------------------------------------------------------------ triggers --
 
+    /** Closing velocity toward a gate from recent qualified fixes (m/s).
+     *  NaN when fix history is too thin: callers must fail closed on NaN. */
+    private float closingToward(Gate g) {
+        int n = fixHist.size();
+        if (g == null || n < 2) return Float.NaN;
+        FixPt last = fixHist.get(n - 1);
+        FixPt first = null;
+        for (int i = n - 2; i >= 0; i--) {
+            first = fixHist.get(i);
+            if (last.t - first.t >= 4000) break;
+        }
+        if (first == null || last.t - first.t < 4000) return Float.NaN;
+        double d0 = g.distanceM(first.lat, first.lng);
+        double d1 = g.distanceM(last.lat, last.lng);
+        return (float) ((d0 - d1) / ((last.t - first.t) / 1000.0));
+    }
+
     private void maybeAutoOpen(String reason, float acc, float speed, Gate target) {
         State s = State.get();
         State.Prefs p = State.Prefs.get();
@@ -554,9 +579,12 @@ public class GateMonitorService extends Service {
                         "too fast (%.0f km/h) — not opening", speed * 3.6));
                 return;
             }
-            if (p.approachFilter && closingEwma < 0.5f) {
-                skipLogOnce("not closing on the gate — approach filter active");
-                return;
+            if (p.approachFilter) {
+                float closing = closingToward(target);
+                if (!(closing > 0.5f)) {
+                    skipLogOnce("not measurably closing on the gate — approach filter active");
+                    return;
+                }
             }
         } else {
             if (p.triggerMode == State.TRIG_GPS) return;
@@ -613,13 +641,23 @@ public class GateMonitorService extends Service {
                     return;
                 }
                 // Approach evidence (risk reduction, NOT radio authentication):
-                // with a recent qualified fix, require actual motion; with no
-                // fix (parking garage), the RSSI rise edge + one-shot latch
-                // stand alone. A stationary phone at home never auto-opens.
+                // auto-open needs a FRESH QUALIFIED fix AND measured closing
+                // velocity toward THIS gate from recent fixes. No fix, or a
+                // stale/coarse fix, or no measurable approach: fail closed -
+                // the explicit per-gate OPEN stays available. Speed alone
+                // (moving in any direction) is never accepted as approach,
+                // and a stationary phone at home never auto-opens.
                 long nowMs = System.currentTimeMillis();
-                boolean recentFix = lastFixAtMs > 0 && nowMs - lastFixAtMs < 30000;
-                if (recentFix && nowMs - lastMotionAtMs > 30000) {
-                    State.get().log("gate radio ≥ trigger but no approach motion — not auto-opening");
+                boolean freshFix = s.fixQualified && lastFixAtMs > 0 && nowMs - lastFixAtMs < 15000;
+                if (!freshFix) {
+                    State.get().log("gate radio ≥ trigger but no fresh qualified fix — not auto-opening (tap the gate's OPEN instead)");
+                    State.get().notifyListeners();
+                    return;
+                }
+                float closingToGate = closingToward(bound);
+                if (!(closingToGate > 0.5f)) {
+                    State.get().log(String.format(Locale.ROOT,
+                            "gate radio ≥ trigger but not approaching %s — not auto-opening", bound.name));
                     State.get().notifyListeners();
                     return;
                 }
@@ -670,7 +708,9 @@ public class GateMonitorService extends Service {
             // user picks the gate explicitly in the app.
             State s = State.get();
             Gate[] out = new Gate[1];
-            int r = GateAssoc.resolveManual(gates, s.hasFix, s.lat, s.lng,
+            boolean freshQ = s.fixQualified && lastFixAtMs > 0
+                    && System.currentTimeMillis() - lastFixAtMs < 15000;
+            int r = GateAssoc.resolveManual(gates, freshQ, s.lat, s.lng,
                     Math.min(State.Prefs.get().radiusM, 40), out);
             if (r == GateAssoc.RESOLVE_ONE) {
                 target = out[0];
