@@ -324,6 +324,15 @@ public class PhoneActivity extends Activity implements State.Listener {
 
         // ------------------------------------------- gates + calibration --
         root.addView(label("GATES — bundled gates ship keyless; keys you enter stay on this phone (private storage, backup off)"));
+        TextView bindHow = new TextView(this);
+        bindHow.setText("Binding the RIGHT radio (two gates are near each other): stand directly "
+                + "AT the gate you are binding, 1-2 m away. Watch the live reading ~10 s and bind "
+                + "only the radio that stays strongest the whole time. Repeat at the other gate. "
+                + "A wrong binding opens the wrong gate - unbind and redo. Then verify once with "
+                + "the gate's OPEN button while standing at it.");
+        bindHow.setTextSize(11);
+        bindHow.setPadding(dp(6), 0, dp(6), dp(6));
+        root.addView(bindHow);
         final Map<String, String> bindings = State.Prefs.macMap(this);
         final State stNow = State.get();
         final boolean freshRadio = stNow.rssi < 127 && !stNow.rssiMac.isEmpty()
@@ -379,7 +388,11 @@ public class PhoneActivity extends Activity implements State.Listener {
 
             if (freshRadio && !stNow.rssiMac.equals(boundMacF)) {
                 Button bind = new Button(this);
-                bind.setText("bind seen radio " + stNow.rssiMac + " → " + g.name);
+                bind.setText("bind seen radio " + stNow.rssiMac + " (" + stNow.rssi + " dBm) → " + g.name);
+                if (stNow.rssi < -67) {
+                    bind.setEnabled(false);
+                    bind.setText("too far to bind (" + stNow.rssi + " dBm) — stand 1-2 m from " + g.name);
+                }
                 bind.setOnClickListener(new View.OnClickListener() {
                     @Override public void onClick(View v) {
                         State.Prefs.learnMac(PhoneActivity.this, stNow.rssiMac, g.id);
