@@ -1,6 +1,7 @@
 package com.palgate.carapp;
 
 import android.app.Notification;
+import android.util.Log;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -612,6 +613,26 @@ public class GateMonitorService extends Service {
 
     private void runOpen(final String why) {
         final State s = State.get();
+
+        // SAFETY: a build whose fixtures are ALL synthetic (every gate id has the
+        // TEST prefix) must never actuate anything - no BLE, no delegate broadcast
+        // to the official PalGate app. Record the dispatch for tests instead.
+        if (!gates.isEmpty()) {
+            boolean allSynthetic = true;
+            for (Gate g : gates) {
+                if (g.id == null || !g.id.startsWith("TEST")) { allSynthetic = false; break; }
+            }
+            if (allSynthetic) {
+                Log.i("PalGate", "SYNTHETIC-DISPATCH " + why + " open requested"
+                        + " (fixture-only build: no BLE, no delegate broadcast)");
+                s.log("SYNTHETIC-DISPATCH " + why + " open (fixture-only build; nothing actuated)");
+                csv("open-" + why + "-synthetic");
+                refreshNotification();
+                GateWidgetProvider.push(this);
+                return;
+            }
+        }
+
         int mode = State.Prefs.get().openMode;
 
         // ---- delegate modes: fire PalGate's own widget open broadcast ----

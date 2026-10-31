@@ -10,6 +10,7 @@ on:
       - 'widgethost/**'
       - 'AndroidManifest.xml'
       - 'build.sh'
+      - 'ci/aa_test.sh'
       - 'fetch_deps.py'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
@@ -50,6 +51,11 @@ jobs:
         with:
           name: PalGateCar-apk
           path: PalGateCar.apk
+
+      - name: Build WidgetHostTest.apk (widget hosted-render harness)
+        env:
+          ECJ_JAR: ${{ github.workspace }}/tools/ecj.jar
+        run: ./widgethost/build_host.sh
 
       - name: Download Open Headunit 3.5.0 (sha256 pinned)
         run: |

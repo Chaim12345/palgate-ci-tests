@@ -85,6 +85,27 @@ adb shell monkey -p com.palgate.carapp -c android.intent.category.LAUNCHER 1 >/d
 shot 01_palgate_phone
 ui_has "PalGate" && note "PalGate phone UI visible" || true
 
+echo "-- gate: widget hosted render + OPEN dispatch (WidgetHostTest) --"
+if [ -f widgethost/WidgetHostTest.apk ]; then
+  adb install -r widgethost/WidgetHostTest.apk >/dev/null 2>&1
+  adb shell appwidget grantbind --package com.palgate.widgethost >/dev/null 2>&1 || true
+  adb shell monkey -p com.palgate.widgethost -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+  sleep 14  # host binds + renders (~1s), auto-clicks OPEN after 4s, dispatch follows
+  adb logcat -d -s WidgetHostTest:I > "$ART/widgethost.log" 2>/dev/null || true
+  adb logcat -d | grep -i 'SYNTHETIC-DISPATCH' > "$ART/synthetic_dispatch.log" 2>/dev/null || true
+  shot 20_widgethost
+  if grep -q 'HOST-RESULT: OPEN-TAPPED' "$ART/widgethost.log" && [ -s "$ART/synthetic_dispatch.log" ]; then
+    note "widget hosted render + OPEN tap recorded synthetic dispatch (no BLE, no broadcast)"
+    row widgethost gate executed "widgethost.log + synthetic_dispatch.log + 20_widgethost.png"
+  elif grep -q 'HOST-RESULT' "$ART/widgethost.log"; then
+    gate_block "widget host: $(tail -1 "$ART/widgethost.log")"; row widgethost gate fail "widgethost.log"
+  else
+    gate_block "widget host produced no HOST-RESULT"; row widgethost gate fail "no result"
+  fi
+else
+  gate_block "WidgetHostTest.apk missing (build step)"; row widgethost gate fail "apk missing"
+fi
+
 echo "-- gate: gearhead present --"
 if adb shell pm list packages | grep -q gearhead; then
   GHVER=$(adb -s "$SER" shell dumpsys package com.google.android.projection.gearhead 2>/dev/null | grep -m1 versionName | tr -d '\r' | awk -F= '{print $2}')

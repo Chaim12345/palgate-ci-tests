@@ -62,11 +62,32 @@ public class HostActivity extends Activity {
         final AppWidgetHostView fv = view;
         new Handler().postDelayed(new Runnable() {
             @Override public void run() {
-                boolean clicked = clickFirst(fv);
-                Log.i(TAG, "auto-click result=" + clicked);
+                // Prefer the widget's OPEN GATE button; fall back to any clickable child.
+                boolean clicked = clickByText(fv, "OPEN GATE");
+                Log.i(TAG, "auto-click OPEN result=" + clicked);
+                if (clicked) { set("HOST-RESULT: OPEN-TAPPED"); return; }
+                clicked = clickFirst(fv);
+                Log.i(TAG, "auto-click fallback result=" + clicked);
                 set("HOST-RESULT: " + (clicked ? "TAPPED" : "NO-CLICKABLE"));
             }
         }, 4000);
+    }
+
+    private boolean clickByText(View v, String text) {
+        if (v instanceof android.widget.TextView) {
+            CharSequence t = ((android.widget.TextView) v).getText();
+            if (t != null && t.toString().contains(text) && v.isClickable()) {
+                v.performClick();
+                return true;
+            }
+        }
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                if (clickByText(g.getChildAt(i), text)) return true;
+            }
+        }
+        return false;
     }
 
     private boolean clickFirst(View v) {

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Widget theme: light (day) -->
+    <color name="widget_bg">#F4F8FC</color>
+    <color name="widget_bg_stroke">#B9CBDC</color>
+    <color name="widget_title">#0B5C8C</color>
+    <color name="widget_text">#12212E</color>
+    <color name="widget_text_inrange">#0A7C42</color>
+    <color name="widget_btn">#0B5C8C</color>
+    <color name="widget_btn_text">#FFFFFF</color>
+</resources>
