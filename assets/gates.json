@@ -1,0 +1,28 @@
+{
+ "gates": [
+  {
+   "id": "TEST000001",
+   "name": "Test Gate A (SYNTHETIC)",
+   "lat": 32.0853,
+   "lng": 34.7818,
+   "key": "00112233445566778899AABBCCDDEEFF",
+   "model": "SG304GI",
+   "mac": "02:11:22:33:44:55",
+   "address": "Synthetic Test Address 1",
+   "relay": "02",
+   "validUntil": "2027-10-11T21:00:00.000Z"
+  },
+  {
+   "id": "TEST000002",
+   "name": "Test Gate B (SYNTHETIC)",
+   "lat": 32.09,
+   "lng": 34.78,
+   "key": "FFEEDDCCBBAA99887766554433221100",
+   "model": "SG304GI",
+   "mac": "02:66:77:88:99:AA",
+   "address": "Synthetic Test Address 2",
+   "relay": "02",
+   "validUntil": "2027-10-11T21:00:00.000Z"
+  }
+ ]
+}

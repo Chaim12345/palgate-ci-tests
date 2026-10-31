@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.palgate.carapp"
+    android:versionCode="3"
+    android:versionName="1.2">
+
+    <!-- Android 11+ package visibility: we talk to the official PalGate app
+         (explicit broadcast to its exported widget receivers + widget id lookup). -->
+    <queries>
+        <package android:name="com.bluegate.app"/>
+    </queries>
+
+    <!-- location -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+
+    <!-- legacy BT (<= Android 11) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
+
+    <!-- modern BT (Android 12+) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" android:minSdkVersion="31"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:minSdkVersion="31"/>
+
+    <!-- foreground service with location type (driving monitor) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false"/>
+    <uses-feature android:name="android.hardware.location.gps" android:required="false"/>
+
+    <application
+        android:label="PalGate Car"
+        android:icon="@drawable/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:allowBackup="false">
+
+        <!-- phone-side UI: permission bootstrap + settings -->
+        <activity android:name=".PhoneActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Android Auto car app (template host binds this) -->
+        <service android:name=".GateCarAppService" android:exported="true"
+            android:label="PalGate Car" android:icon="@drawable/ic_launcher">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService"/>
+                <category android:name="androidx.car.app.category.NAVIGATION"/>
+            </intent-filter>
+        </service>
+
+        <!-- driving monitor: geofence + condition gates + BLE auto-open -->
+        <service android:name=".GateMonitorService" android:exported="false"
+            android:foregroundServiceType="location"/>
+
+        <!-- phone home-screen widget -->
+        <receiver android:name=".GateWidgetProvider" android:exported="false"
+            android:label="PalGate">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info"/>
+        </receiver>
+
+        <!-- discovered by the Android Auto host -->
+        <meta-data android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc"/>
+    </application>
+</manifest>

@@ -1,0 +1,9 @@
+aars/
+cp/
+out/
+*.jks
+*.keystore
+PalGateCar.apk
+PalGateCar.apk.idsig
+*.apk
+!tools/*.jar
