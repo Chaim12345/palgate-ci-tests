@@ -1,7 +1,9 @@
 name: apk-source-probe
+# Manual-only: HEAD-probes candidate APK mirror/download URLs. NOT run on push:
+# the mirrors are bot-walled, results do not change between pushes, and
+# re-contacting them on every push is exactly the traffic pattern to avoid.
 on:
-  push:
-    branches: [ci/dhu-widget-host]
+  workflow_dispatch:
 jobs:
   probe:
     runs-on: ubuntu-latest

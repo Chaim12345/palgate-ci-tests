@@ -1,6 +1,17 @@
 name: palgate-ci
 on:
   push:
+    # Full emulator + DHU run only when app/projection-relevant files change.
+    # Synthetic fixture (assets/) and CI-script-only updates are covered by
+    # the fast fixtures-kat workflow instead.
+    paths:
+      - 'src/**'
+      - 'res/**'
+      - 'widgethost/**'
+      - 'AndroidManifest.xml'
+      - 'build.sh'
+      - 'fetch_deps.py'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 jobs:
@@ -59,6 +70,11 @@ jobs:
           arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 3072
           script: ./ci/aa_test.sh
+
+      - name: Scan artifact staging for secrets before upload
+        if: always()
+        run: |
+          if [ -d artifacts ]; then python3 ci/scan_secrets.py --dir artifacts; fi
 
       - name: Upload test artifacts
         if: always()

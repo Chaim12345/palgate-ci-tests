@@ -31,7 +31,15 @@ PATTERNS = [
 ]
 PHONE = re.compile(r"\+?972[-\s]?5\d[-\s]?\d{3}[-\s]?\d{4}")
 
-files = subprocess.run(["git", "ls-files"], capture_output=True, text=True).stdout.split()
+if len(sys.argv) >= 3 and sys.argv[1] == "--dir":
+    root = sys.argv[2]
+    files = []
+    for base, dirs, names in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".git")]
+        for n in names:
+            files.append(os.path.join(base, n))
+else:
+    files = subprocess.run(["git", "ls-files"], capture_output=True, text=True).stdout.split()
 violations = 0
 for f in files:
     if f.startswith(SKIP_DIRS) or f.endswith(SKIP_EXT):
