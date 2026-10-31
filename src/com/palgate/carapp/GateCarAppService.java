@@ -41,7 +41,13 @@ public class GateCarAppService extends CarAppService {
                 @Override public void run() { State.get().aaConnected = true; }
             });
             State.get().log("Android Auto session started");
-            try {
+            boolean locOk = android.os.Build.VERSION.SDK_INT < 23
+                    || getCarContext().checkSelfPermission(
+                            android.Manifest.permission.ACCESS_FINE_LOCATION)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED;
+            if (!locOk) {
+                State.get().log("location permission not granted — start the monitor from the phone app first");
+            } else try {
                 Intent start = new Intent(getCarContext(), GateMonitorService.class);
                 start.setAction(GateMonitorService.ACTION_START);
                 if (android.os.Build.VERSION.SDK_INT >= 26) {
@@ -50,6 +56,7 @@ public class GateCarAppService extends CarAppService {
                     getCarContext().startService(start);
                 }
             } catch (Exception e) {
+                // Android 12+ blocks background FGS starts (ForegroundServiceStartNotAllowedException)
                 State.get().log("could not start monitor from car UI (" + e.getClass().getSimpleName()
                         + ") — start it from the phone app");
             }

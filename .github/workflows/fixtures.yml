@@ -1,0 +1,45 @@
+name: fixtures-kat
+
+on:
+  push:
+    branches: [ci/dhu-widget-host]
+  pull_request:
+  workflow_dispatch:
+
+# Fast, emulator-free checks: fixture schema + crypto known-answer tests.
+# Stays green independently of the (currently blocked) DHU projection gate.
+jobs:
+  fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Scan repo for non-whitelisted secrets
+        run: python3 ci/scan_secrets.py
+
+      - name: Validate gates.json fixture schema + synthetic markers
+        run: python3 ci/validate_fixtures.py
+
+      - name: Compile GateCrypto and run known-answer tests (plain JVM, no Android SDK)
+        run: |
+          mkdir -p out
+          javac -encoding UTF-8 -d out src/com/palgate/carapp/GateCrypto.java test/GateCryptoKat.java
+          java -cp out GateCryptoKat
+
+      - name: Android-free app behavior tests (fixture load/defaults/overrides/geo/gate-side CR roundtrip)
+        run: |
+          mkdir -p out2
+          javac -encoding UTF-8 -cp tools/json-20240303.jar -d out2 \
+            test/stubs/android/content/res/AssetManager.java \
+            test/stubs/android/content/SharedPreferences.java \
+            test/stubs/android/content/Context.java \
+            test/stubs/android/util/Log.java \
+            src/com/palgate/carapp/GateCrypto.java \
+            src/com/palgate/carapp/Gate.java \
+            test/GateLocalTest.java
+          java -cp out2:tools/json-20240303.jar GateLocalTest

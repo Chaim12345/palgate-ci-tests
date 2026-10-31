@@ -1,9 +1,14 @@
 aars/
 cp/
 out/
+res_libs/
+apk_x/
 *.jks
 *.keystore
 PalGateCar.apk
 PalGateCar.apk.idsig
 *.apk
 !tools/*.jar
+out/
+out2/
+assets/test_build.marker

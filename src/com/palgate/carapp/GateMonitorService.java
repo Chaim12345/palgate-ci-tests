@@ -1,6 +1,7 @@
 package com.palgate.carapp;
 
 import android.app.Notification;
+import android.util.Log;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -64,6 +65,7 @@ public class GateMonitorService extends Service {
     public static final String ACTION_START = "com.palgate.carapp.START";
     public static final String ACTION_STOP = "com.palgate.carapp.STOP";
     public static final String ACTION_OPEN_NOW = "com.palgate.carapp.OPEN_NOW";
+    public static final String ACTION_REFRESH = "com.palgate.carapp.REFRESH";
     private static final String CHANNEL_ID = "palgate_car";
     private static final int NOTIF_ID = 42;
     private static final long OPEN_COOLDOWN_MS = 45000;
@@ -124,12 +126,29 @@ public class GateMonitorService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (ACTION_REFRESH.equals(action)) {
+            // Widget root tap: refresh state display only. Never starts
+            // monitoring here, so no geofence/auto-open side effects.
+            GateWidgetProvider.push(this);
+            if (!listening) stopSelf();
+            return START_NOT_STICKY;
+        }
         if (ACTION_OPEN_NOW.equals(action)) {
             manualOpen();
             // fallthrough: keep running (or start properly below if not yet)
         }
         if (!listening) {
-            startAsForeground();
+            try {
+                startAsForeground();
+            } catch (Exception e) {
+                // e.g. SecurityException when location permission is missing —
+                // must not crash the process (this fires on Android Auto when the
+                // car session starts the service before the phone UI granted perms)
+                State.get().log("cannot start foreground service ("
+                        + e.getClass().getSimpleName() + ") — grant location permission in the PalGate app first");
+                stopSelf();
+                return START_NOT_STICKY;
+            }
             startListening();
         }
         return START_STICKY;
@@ -612,6 +631,21 @@ public class GateMonitorService extends Service {
 
     private void runOpen(final String why) {
         final State s = State.get();
+
+        // TEST BUILD ONLY (build-time marker, see GateSafety): never actuate.
+        // runOpen is the single choke point for every open path (manual widget/
+        // notification opens, GPS/BLE auto-open, direct BLE and PalGate delegate
+        // modes) - nothing below runs in a test build.
+        if (GateSafety.isTestBuild(this)) {
+            Log.i("PalGate", "SYNTHETIC-DISPATCH " + why + " open requested"
+                    + " (test build: BLE + delegate broadcast disabled at dispatcher)");
+            s.log("SYNTHETIC-DISPATCH " + why + " open (test build; nothing actuated)");
+            csv("open-" + why + "-synthetic");
+            refreshNotification();
+            GateWidgetProvider.push(this);
+            return;
+        }
+
         int mode = State.Prefs.get().openMode;
 
         // ---- delegate modes: fire PalGate's own widget open broadcast ----
@@ -752,7 +786,12 @@ public class GateMonitorService extends Service {
         f.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
         f.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         try {
-            registerReceiver(btReceiver, f);
+            if (Build.VERSION.SDK_INT >= 33) {
+                // Android 14 requires an explicit exported flag, else SecurityException
+                registerReceiver(btReceiver, f, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(btReceiver, f);
+            }
         } catch (Exception ignored) {
         }
         BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);

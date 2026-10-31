@@ -1,0 +1,15 @@
+# Synthetic whitelist: the ONLY hex secrets/MACs permitted anywhere in this repo.
+# One token per line; "# comment" allowed. Matching is case-insensitive.
+# Any other 32-hex / 40-hex / 46-hex string or MAC found by ci/scan_secrets.py FAILS CI.
+00112233445566778899AABBCCDDEEFF # synthetic gate key A (fixtures + KAT)
+FFEEDDCCBBAA99887766554433221100 # synthetic gate key B (fixtures + KAT)
+A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5A5 # KAT vector key (openssl-computed golden)
+00000000000000000000000000000000 # KAT all-zero challenge
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF # KAT all-FF challenge
+0102030405060708090A0B0C0D0E0F10 # KAT sequential challenge
+31E4DA56914828B26F7F464FDF3CFCAE # KAT classic golden (openssl-computed)
+813CB5EFC7562CFEB019D6F908C5B201DCA9CC28 # KAT modern golden 1 (openssl-computed)
+AC371711D2B0B687C5EA24A46D81B2F8FB196590 # KAT modern golden 2 (openssl-computed)
+0ADE3D4CDED5CDA48752324AB50D782148D16BDC # KAT modern golden 3 (openssl-computed)
+02:11:22:33:44:55 # synthetic gate MAC A (locally-administered 02: prefix)
+02:66:77:88:99:AA # synthetic gate MAC B (locally-administered 02: prefix)

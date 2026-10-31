@@ -1,6 +1,18 @@
 name: palgate-ci
 on:
   push:
+    # Full emulator + DHU run only when app/projection-relevant files change.
+    # Synthetic fixture (assets/) and CI-script-only updates are covered by
+    # the fast fixtures-kat workflow instead.
+    paths:
+      - 'src/**'
+      - 'res/**'
+      - 'widgethost/**'
+      - 'AndroidManifest.xml'
+      - 'build.sh'
+      - 'ci/aa_test.sh'
+      - 'fetch_deps.py'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 
 jobs:
@@ -9,6 +21,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Preflight secret scan (synthetic whitelist)
+        run: python3 ci/scan_secrets.py
 
       - uses: actions/setup-java@v4
         with:
@@ -19,11 +34,14 @@ jobs:
         run: |
           SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SM" --licenses >/dev/null || true
-          "$SM" "platforms;android-34" "build-tools;34.0.0" "platform-tools" "emulator"
+          "$SM" "platforms;android-34" "build-tools;34.0.0" "platform-tools" "emulator" "extras;google;auto"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libc++1 libc++abi1 xvfb
 
       - name: Fetch androidx deps and build APK
         env:
           ECJ_JAR: ${{ github.workspace }}/tools/ecj.jar
+          TEST_BUILD: '1'
         run: |
           python3 fetch_deps.py
           python3 extract_cp.py
@@ -34,6 +52,11 @@ jobs:
         with:
           name: PalGateCar-apk
           path: PalGateCar.apk
+
+      - name: Build WidgetHostTest.apk (widget hosted-render harness)
+        env:
+          ECJ_JAR: ${{ github.workspace }}/tools/ecj.jar
+        run: ./widgethost/build_host.sh
 
       - name: Download Open Headunit 3.5.0 (sha256 pinned)
         run: |
@@ -47,6 +70,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Run Android Auto + widget tests
+        env:
+          RUN_DHU: ${{ (contains(github.event.head_commit.message, '[dhu-run]') || github.event_name == 'workflow_dispatch') && '1' || '0' }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -54,6 +79,11 @@ jobs:
           arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 3072
           script: ./ci/aa_test.sh
+
+      - name: Scan artifact staging for secrets before upload
+        if: always()
+        run: |
+          if [ -d artifacts ]; then python3 ci/scan_secrets.py --dir artifacts; fi
 
       - name: Upload test artifacts
         if: always()

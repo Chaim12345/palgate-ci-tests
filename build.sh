@@ -14,17 +14,57 @@ OUT="$SRC/out"
 rm -rf "$OUT"
 mkdir -p "$OUT/classes" "$OUT/gen" "$OUT/compiled-res" "$OUT/dex"
 
+if [ "${TEST_BUILD:-0}" = "1" ]; then
+  echo "ci-test-build" > "$SRC/assets/test_build.marker"
+  trap 'rm -f "$SRC/assets/test_build.marker"' EXIT
+  echo "== TEST_BUILD=1: actuation-disabled marker injected =="
+fi
+
 echo "== 1/6 aapt2 compile resources =="
 "$BT/aapt2" compile --dir "$SRC/res" -o "$OUT/compiled-res"
+# AAR (library) resources: androidx.car.app reads its own R (content limits,
+# library version string) at runtime on Android Auto — without these linked
+# into the APK the car app dies with NoClassDefFoundError while the phone UI
+# works fine. Each lib's res is link-checked standalone first; libs whose res
+# references unavailable packages (e.g. media -> appcompat) are skipped.
+LIB_FLATS=()
+EXTRA_PKGS=()
+if [ -d "$SRC/res_libs" ]; then
+  for d in "$SRC"/res_libs/*/; do
+    [ -d "$d/res" ] || continue
+    pkg="$(cat "$d/package.txt" 2>/dev/null || true)"
+    [ -n "$pkg" ] || continue
+    name="$(basename "$d")"
+    mf="$OUT/libmanifest-$name.xml"
+    printf '<?xml version="1.0" encoding="utf-8"?>\n<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="%s"/>\n' "$pkg" > "$mf"
+    # note: aapt2 compile --dir -o <path> writes a single zip of flats
+    "$BT/aapt2" compile --dir "$d/res" -o "$OUT/lib-res-$name.zip"
+    if "$BT/aapt2" link --static-lib -I "$PLAT" --manifest "$mf" \
+        -o "$OUT/lib-$name.ap_" "$OUT/lib-res-$name.zip" 2>"$OUT/lib-$name.err"; then
+      LIB_FLATS+=("$OUT/lib-res-$name.zip")
+      EXTRA_PKGS+=("$pkg")
+      echo "   lib res ok: $name ($pkg)"
+    else
+      echo "   lib res skipped (does not link standalone): $name"
+    fi
+  done
+fi
 
 echo "== 2/6 aapt2 link (base APK + R.java) =="
 mapfile -t FLATS < <(find "$OUT/compiled-res" -name '*.flat' | sort)
+FLATS+=("${LIB_FLATS[@]}")
+EXTRA=""
+if [ ${#EXTRA_PKGS[@]} -gt 0 ]; then
+  EXTRA="--extra-packages $(IFS=:; echo "${EXTRA_PKGS[*]}")"
+fi
+# shellcheck disable=SC2086
 "$BT/aapt2" link -I "$PLAT" \
   --manifest "$SRC/AndroidManifest.xml" \
   --min-sdk-version 23 --target-sdk-version 34 \
   --version-code 3 --version-name 1.2 \
   -A "$SRC/assets" \
   --java "$OUT/gen" \
+  $EXTRA \
   -o "$OUT/base.apk" \
   "${FLATS[@]}"
 

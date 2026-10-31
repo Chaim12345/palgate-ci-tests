@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto "Car widgets" (Earth) hosts ordinary phone widgets and rescales
+     them with a slider; guidance: fill grid bounds, light+dark, no scrolling,
+     glanceable. previewLayout/targetCell* are API 31+ hints, ignored below. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="180dp"
+    android:minWidth="140dp"
     android:minHeight="110dp"
+    android:minResizeWidth="120dp"
+    android:minResizeHeight="80dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/widget_gate"
+    android:previewLayout="@layout/widget_preview"
     android:resizeMode="horizontal|vertical"
+    android:description="@string/widget_desc"
     android:widgetCategory="home_screen"/>
