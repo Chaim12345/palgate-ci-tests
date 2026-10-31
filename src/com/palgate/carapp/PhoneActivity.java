@@ -325,11 +325,12 @@ public class PhoneActivity extends Activity implements State.Listener {
         // ------------------------------------------- gates + calibration --
         root.addView(label("GATES — bundled gates ship keyless; keys you enter stay on this phone (private storage, backup off)"));
         TextView bindHow = new TextView(this);
-        bindHow.setText("Binding the RIGHT radio (two gates are near each other): stand directly "
-                + "AT the gate you are binding, 1-2 m away. Watch the live reading ~10 s and bind "
-                + "only the radio that stays strongest the whole time. Repeat at the other gate. "
-                + "A wrong binding opens the wrong gate - unbind and redo. Then verify once with "
-                + "the gate's OPEN button while standing at it.");
+        bindHow.setText("Binding the RIGHT radio (two gates are near each other): stand 1-2 m AT "
+                + "the gate. If a radio's advertised name matches the gate's serial, the button "
+                + "says so - that one is certain. Otherwise the strongest reading is only a HINT, "
+                + "not proof: bind it, then with auto-open OFF tap that gate's OPEN while standing "
+                + "at it - if the wrong gate opens, unbind and bind the other radio. Repeat for "
+                + "the other gate. Only enable auto-open after both bindings are verified.");
         bindHow.setTextSize(11);
         bindHow.setPadding(dp(6), 0, dp(6), dp(6));
         root.addView(bindHow);
@@ -387,9 +388,13 @@ public class PhoneActivity extends Activity implements State.Listener {
             root.addView(setKey);
 
             if (freshRadio && !stNow.rssiMac.equals(boundMacF)) {
+                String advName = stNow.rssiName == null ? "" : stNow.rssiName.trim();
+                boolean serialMatch = !advName.isEmpty() && advName.equalsIgnoreCase(g.id);
                 Button bind = new Button(this);
-                bind.setText("bind seen radio " + stNow.rssiMac + " (" + stNow.rssi + " dBm) → " + g.name);
-                if (stNow.rssi < -67) {
+                bind.setText("bind " + (advName.isEmpty() ? "radio " : advName + " / ")
+                        + stNow.rssiMac + " (" + stNow.rssi + " dBm) → " + g.name
+                        + (serialMatch ? " ✓ serial matches" : " (tentative)"));
+                if (stNow.rssi < -67 && !serialMatch) {
                     bind.setEnabled(false);
                     bind.setText("too far to bind (" + stNow.rssi + " dBm) — stand 1-2 m from " + g.name);
                 }
