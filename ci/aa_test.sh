@@ -76,70 +76,115 @@ else
 fi
 
 if [ "$GEARHEAD" = 1 ]; then
-  echo "-- AA developer mode: open gearhead settings --"
-  adb shell monkey -p com.google.android.projection.gearhead -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-  sleep 8
-  shot 02_aa_settings
-  # try to reach the About/Version row and tap it 10x
+  echo "-- AA developer mode: Settings > Connected devices > Connection preferences > Android Auto --"
+  DISP=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | head -1); SW=${DISP%x*}; SH=${DISP#*x}
+  SW=${SW:-320}; SH=${SH:-640}
+  CX=$((SW/2)); QY=$((SH/4)); LY=$((SH*3/4))
+  echo "display: ${SW}x${SH}"
+  scrollup() { adb shell input swipe $CX $LY $CX $QY 300; sleep 1; }
+  adb shell input keyevent KEYCODE_HOME; sleep 1
+  adb shell am start -a android.settings.SETTINGS >/dev/null 2>&1
+  sleep 4
   ok=0
-  for i in 1 2 3 4 5; do
-    if tap_text "Version"; then ok=1; break; fi
-    tap_text "About" || adb shell input swipe 540 1500 540 500 300
-    sleep 2
+  for i in 1 2 3 4 5 6; do
+    if tap_text "Connected devices"; then ok=1; break; fi
+    scrollup
   done
-  if [ "$ok" = 1 ]; then
-    for i in $(seq 1 10); do tap_text "Version" >/dev/null 2>&1 || true; sleep 0.4; done
-    note "AA version row tapped 10x (developer mode attempt)"
-  else
-    block "could not locate AA Version row (see artifacts/ui_last.xml + 02_aa_settings.png)"
-  fi
-  shot 03_aa_after_version_taps
-  # developer settings -> start head unit server
-  if tap_text "Developer settings" || tap_text "developer settings"; then sleep 3; fi
-  if tap_text "Start head unit server" || tap_text "Start Head Unit Server"; then
-    note "head unit server start tapped"
-  else
-    block "head unit server toggle not found (see 03/04 artifacts)"
-  fi
-  sleep 3
-  shot 04_aa_headunit_server
-  if adb shell netstat -lnt 2>/dev/null | grep -q 5277 || adb shell ss -lnt 2>/dev/null | grep -q 5277; then
-    note "AA head unit server listening on 5277"
-    HUS=1
-  else
-    block "port 5277 not listening; AA loopback not established"
-    HUS=0
-  fi
-
-  if [ "$HUS" = 1 ]; then
-    echo "-- launch Open Headunit (client) --"
-    adb shell monkey -p com.andrerinas.headunitrevived -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-    sleep 8
-    shot 05_openheadunit
-    # best-effort: accept any first-run dialogs, then look for self/loopback connection
-    tap_text "OK" >/dev/null 2>&1 || true
-    tap_text "Allow" >/dev/null 2>&1 || true
-    sleep 2
-    tap_text "Self" >/dev/null 2>&1 || tap_text "127.0.0.1" >/dev/null 2>&1 || true
-    sleep 10
-    shot 06_aa_projection
-    if ui_has "PalGate"; then
-      note "PalGate visible inside Android Auto launcher projection"
+  if [ "$ok" != 1 ]; then block "Settings: Connected devices row not found"; fi
+  sleep 2
+  tap_text "Connection preferences" || { scrollup; tap_text "Connection preferences" || true; }
+  sleep 2
+  if tap_text "Android Auto"; then
+    sleep 4
+    shot 02_aa_settings
+    adb shell dumpsys window 2>/dev/null | grep -i mCurrentFocus || true
+    ok=0
+    for i in 1 2 3 4 5 6 7 8; do
+      if ui_has 'text="Version"'; then ok=1; break; fi
+      scrollup
+    done
+    if [ "$ok" = 1 ]; then
+      for i in $(seq 1 12); do tap_text "Version" >/dev/null 2>&1 || true; sleep 0.4; done
+      note "AA version row tapped 12x (developer mode attempt)"
     else
-      block "AA projection not confirmed / PalGate not visible (see 06 artifacts)"
+      block "could not locate AA Version row (see ui_last.xml + 02_aa_settings.png)"
     fi
-    if tap_text "PalGate"; then
-      sleep 6
-      shot 07_palgate_car_screen
-      if ui_has "Gate\|PalGate"; then note "PalGate car screen opened in AA"; else fail "PalGate car screen did not render"; fi
+    sleep 2
+    shot 03_aa_after_version_taps
+    uidump
+    MC=$(python3 - <<'PY'
+import re
+try: xml=open('artifacts/ui_last.xml').read()
+except Exception: raise SystemExit(0)
+for pat in (r'content-desc="More options"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',
+            r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*content-desc="More options"'):
+    m=re.search(pat,xml)
+    if m:
+        x1,y1,x2,y2=map(int,m.groups()); print((x1+x2)//2,(y1+y2)//2); break
+PY
+)
+    [ -z "$MC" ] && MC="$((SW-30)) 60"
+    adb shell input tap $MC
+    sleep 2
+    if tap_text "Start head unit server"; then
+      note "head unit server start tapped"
+    else
+      if tap_text "Developer settings"; then
+        sleep 2
+        tap_text "Start head unit server" && note "head unit server start tapped (via developer settings)" || block "head unit server toggle not found in developer settings"
+      else
+        block "head unit server toggle not found (see 03/04 artifacts)"
+      fi
     fi
+    sleep 3
+    shot 04_aa_headunit_server
+    if adb shell netstat -lnt 2>/dev/null | grep -q 5277 || adb shell ss -lnt 2>/dev/null | grep -q 5277; then
+      note "AA head unit server listening on 5277"
+      HUS=1
+    else
+      block "port 5277 not listening; AA loopback not established"
+      HUS=0
+    fi
+
+    if [ "$HUS" = 1 ]; then
+      echo "-- launch Open Headunit (client) --"
+      adb shell monkey -p com.andrerinas.headunitrevived -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+      sleep 8
+      shot 05_openheadunit
+      tap_text "OK" >/dev/null 2>&1 || true
+      tap_text "Allow" >/dev/null 2>&1 || true
+      sleep 2
+      tap_text "Self" >/dev/null 2>&1 || tap_text "127.0.0.1" >/dev/null 2>&1 || true
+      sleep 10
+      shot 06_aa_projection
+      if ui_has "PalGate"; then
+        note "PalGate visible inside Android Auto launcher projection"
+        if tap_text "PalGate"; then
+          sleep 6
+          shot 07_palgate_car_screen
+          if ui_has "Gate\|PalGate"; then note "PalGate car screen opened in AA"; else fail "PalGate car screen did not render"; fi
+        fi
+      else
+        block "AA projection not confirmed / PalGate not visible (see 06 artifacts)"
+      fi
+    fi
+  else
+    block "Android Auto settings screen not reachable (see artifacts)"
   fi
 fi
 
 echo "-- home-screen widget --"
+if adb shell dumpsys appwidget 2>/dev/null | grep -qi 'com.palgate.carapp'; then
+  note "widget provider registered with AppWidgetManager (com.palgate.carapp)"
+else
+  fail "widget provider NOT registered with AppWidgetManager"
+fi
+DISP=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | head -1); SW=${DISP%x*}; SH=${DISP#*x}
+SW=${SW:-320}; SH=${SH:-640}
+CX=$((SW/2))
 adb shell input keyevent KEYCODE_HOME
 sleep 3
-adb shell input swipe 540 800 540 800 1500   # long-press home
+adb shell input swipe $CX $((SH/3)) $CX $((SH/3)) 1500   # long-press empty home area
 sleep 2
 shot 08_home_longpress
 if tap_text "Widgets"; then
@@ -148,13 +193,10 @@ if tap_text "Widgets"; then
   found=0
   for i in 1 2 3 4 5 6 7 8; do
     if ui_has "PalGate"; then found=1; break; fi
-    adb shell input swipe 540 1400 540 600 400; sleep 1.5
+    adb shell input swipe $CX $((SH*3/4)) $CX $((SH/4)) 400; sleep 1.5
   done
   if [ "$found" = 1 ]; then
     note "PalGate widget listed in picker"
-    # drag widget onto home: long-press its coords then swipe up
-    W=$(tap_text "PalGate" && echo ok)
-    sleep 1
     uidump
     COORDS=$(python3 - <<'PY'
 import re
@@ -165,7 +207,7 @@ if m:
 PY
 )
     if [ -n "$COORDS" ]; then
-      adb shell input swipe $COORDS 540 400 1800   # long-press-drag upward onto home
+      adb shell input swipe $COORDS $CX $((SH/5)) 1800   # long-press-drag onto home
       sleep 3
       shot 10_widget_on_home
       if ui_has "PalGate"; then
