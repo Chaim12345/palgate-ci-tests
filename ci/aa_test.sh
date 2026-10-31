@@ -88,7 +88,11 @@ ui_has "PalGate" && note "PalGate phone UI visible" || true
 echo "-- gate: gearhead present --"
 if adb shell pm list packages | grep -q gearhead; then
   GHVER=$(adb -s "$SER" shell dumpsys package com.google.android.projection.gearhead 2>/dev/null | grep -m1 versionName | tr -d '\r' | awk -F= '{print $2}')
-  note "gearhead (Android Auto) present, versionName=$GHVER"; row gearhead gate executed "pm list packages v=$GHVER"
+  # trusted baseline: preinstalled gearhead signing cert digest
+  GHPATH=$(adb -s "$SER" shell pm path com.google.android.projection.gearhead 2>/dev/null | head -1 | sed 's/package://' | tr -d '\r')
+  adb -s "$SER" pull "$GHPATH" "$ART/gearhead-preinstalled.apk" >/dev/null 2>&1 || true
+  GHCERT=$("${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/"*/apksigner verify --print-certs "$ART/gearhead-preinstalled.apk" 2>/dev/null | grep -m1 'SHA-256' | awk '{print $NF}')
+  note "gearhead (Android Auto) present, versionName=$GHVER cert-sha256=$GHCERT"; row gearhead gate executed "pm list packages v=$GHVER cert=$GHCERT"
 else
   gate_block "gearhead not preinstalled on this image"; row gearhead gate gate-blocked "package missing"
 fi
