@@ -242,6 +242,18 @@ if grep -qi "Bluetooth is off\|bluetooth is off" "$ART/logcat_palgate.txt"; then
   note "app took the graceful Bluetooth-off path (no radio, no real gate action)"
 fi
 
+echo "-- crash check: any FATAL EXCEPTION in com.palgate.carapp fails the run --"
+adb logcat -d > "$ART/logcat_full.txt" 2>/dev/null || true
+adb shell dumpsys activity services com.palgate.carapp > "$ART/services.txt" 2>/dev/null || true
+adb shell ps -A 2>/dev/null | grep -i palgate > "$ART/ps.txt" || true
+if grep -q "FATAL EXCEPTION" "$ART/logcat_full.txt" \
+   && awk '/FATAL EXCEPTION/{f=1} f && /com\.palgate\.carapp/{print; exit}' "$ART/logcat_full.txt" | grep -q .; then
+  fail "app crashed (FATAL EXCEPTION in com.palgate.carapp) — see artifacts/logcat_full.txt"
+  grep -A25 "FATAL EXCEPTION" "$ART/logcat_full.txt" | grep -m1 -B1 -A24 "com.palgate.carapp" || true
+else
+  note "no FATAL EXCEPTION in com.palgate.carapp"
+fi
+
 adb shell screencap -p /sdcard/_final.png >/dev/null 2>&1
 adb pull /sdcard/_final.png "$ART/12_final.png" >/dev/null 2>&1
 

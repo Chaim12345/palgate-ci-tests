@@ -129,7 +129,17 @@ public class GateMonitorService extends Service {
             // fallthrough: keep running (or start properly below if not yet)
         }
         if (!listening) {
-            startAsForeground();
+            try {
+                startAsForeground();
+            } catch (Exception e) {
+                // e.g. SecurityException when location permission is missing —
+                // must not crash the process (this fires on Android Auto when the
+                // car session starts the service before the phone UI granted perms)
+                State.get().log("cannot start foreground service ("
+                        + e.getClass().getSimpleName() + ") — grant location permission in the PalGate app first");
+                stopSelf();
+                return START_NOT_STICKY;
+            }
             startListening();
         }
         return START_STICKY;
@@ -752,7 +762,12 @@ public class GateMonitorService extends Service {
         f.addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED);
         f.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
         try {
-            registerReceiver(btReceiver, f);
+            if (Build.VERSION.SDK_INT >= 33) {
+                // Android 14 requires an explicit exported flag, else SecurityException
+                registerReceiver(btReceiver, f, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(btReceiver, f);
+            }
         } catch (Exception ignored) {
         }
         BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);

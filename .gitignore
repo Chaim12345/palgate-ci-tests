@@ -1,6 +1,8 @@
 aars/
 cp/
 out/
+res_libs/
+apk_x/
 *.jks
 *.keystore
 PalGateCar.apk
