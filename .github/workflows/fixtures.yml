@@ -42,5 +42,6 @@ jobs:
             src/com/palgate/carapp/GateCrypto.java \
             src/com/palgate/carapp/Gate.java \
             src/com/palgate/carapp/GateAssoc.java \
+            src/com/palgate/carapp/Approach.java \
             test/GateLocalTest.java
           java -cp out2:tools/json-20240303.jar GateLocalTest
