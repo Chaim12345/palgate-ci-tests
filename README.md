@@ -16,4 +16,6 @@ Android emulator (KVM), then run ci/aa_test.sh: installs, permissions, fake
 GPS, Android Auto head-unit-server loopback with Open Headunit, PalGate car
 app launch via the AA launcher, and the home-screen widget add/render/tap
 checks. Screenshots, uiautomator dumps and logcat are uploaded as artifacts;
-executed vs blocked checks are reported explicitly.
+executed vs blocked checks are reported explicitly. Any FATAL EXCEPTION in
+com.palgate.carapp fails the run. See TESTING.md for local emulator and
+Desktop Head Unit recipes.

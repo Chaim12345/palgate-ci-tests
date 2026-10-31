@@ -25,6 +25,8 @@ import androidx.car.app.model.Template;
 import androidx.car.app.navigation.model.MapWithContentTemplate;
 import androidx.car.app.SurfaceCallback;
 import androidx.car.app.SurfaceContainer;
+import androidx.lifecycle.DefaultLifecycleObserver;
+import androidx.lifecycle.LifecycleOwner;
 
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +55,14 @@ public class MapScreen extends Screen implements State.Listener {
         super(ctx);
         State.get().addListener(this);
         getCarContext().getCarService(AppManager.class).setSurfaceCallback(surfaceListener);
+        // stop listening when the AA session dies, else state updates keep
+        // calling invalidate()/render() on a dead screen
+        getLifecycle().addObserver(new DefaultLifecycleObserver() {
+            @Override
+            public void onDestroy(LifecycleOwner owner) {
+                State.get().removeListener(MapScreen.this);
+            }
+        });
     }
 
     @Override
@@ -146,7 +156,11 @@ public class MapScreen extends Screen implements State.Listener {
         long since = now - lastInvalidateAt;
         if (since >= 1100) {
             lastInvalidateAt = now;
-            invalidate();
+            try {
+                invalidate();
+            } catch (Exception ignored) {
+                // screen already destroyed / session gone
+            }
         } else if (!invalidateQueued) {
             invalidateQueued = true;
             uiH.postDelayed(new Runnable() {
