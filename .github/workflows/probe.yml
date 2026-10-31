@@ -1,0 +1,20 @@
+name: apk-source-probe
+on:
+  push:
+    branches: [ci/dhu-widget-host]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe candidate APK sources (HEAD only, no download)
+        run: |
+          UA='Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
+          for u in \
+            'https://www.apkmirror.com/apk/google-inc/android-auto/android-auto-9-8-6324-release/android-auto-9-8-632428-release-android-apk-download/' \
+            'https://d.apkpure.com/b/APK/com.google.android.projection.gearhead?version=latest' \
+            'https://android-auto.en.uptodown.com/android' \
+            'https://dl.google.com/android/repository/desktop-head-unit-linux-x64_r02.1.zip' \
+          ; do
+            code=$(curl -sIL -A "$UA" -o /dev/null -w '%{http_code}' --max-time 25 "$u" || echo ERR)
+            echo "PROBE $code $u"
+          done
