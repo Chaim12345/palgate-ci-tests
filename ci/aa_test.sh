@@ -87,7 +87,8 @@ ui_has "PalGate" && note "PalGate phone UI visible" || true
 
 echo "-- gate: gearhead present --"
 if adb shell pm list packages | grep -q gearhead; then
-  note "gearhead (Android Auto) present"; row gearhead gate executed "pm list packages"
+  GHVER=$(adb -s "$SER" shell dumpsys package com.google.android.projection.gearhead 2>/dev/null | grep -m1 versionName | tr -d '\r' | awk -F= '{print $2}')
+  note "gearhead (Android Auto) present, versionName=$GHVER"; row gearhead gate executed "pm list packages v=$GHVER"
 else
   gate_block "gearhead not preinstalled on this image"; row gearhead gate gate-blocked "package missing"
 fi
@@ -146,9 +147,22 @@ if [ "$HUS" = 1 ] && [ -x "$DHU" ]; then
   Xvfb :99 -screen 0 1024x768x24 >/dev/null 2>&1 &
   XVFBPID=$!
   sleep 2
+  # re-confirm the head unit server is still listening right before DHU
+  if ! adb -s "$SER" shell 'netstat -lnt 2>/dev/null | grep -q 5277'; then
+    gate_block "head unit server stopped listening before DHU"; row dhu gate fail "5277 lost"
+  else
+  adb forward tcp:5277 tcp:5277 >/dev/null 2>&1 || true
   ( printf 'help\n'; sleep 45 ) | DISPLAY=:99 timeout 60 "$DHU" > "$ART/dhu.log" 2>&1 &
   DHUPID=$!
-  sleep 30
+  sleep 15
+  if ! kill -0 $DHUPID 2>/dev/null && grep -qi 'connect over USB transport' "$ART/dhu.log"; then
+    note "DHU transport miss, retrying once"
+    ( printf 'help\n'; sleep 45 ) | DISPLAY=:99 timeout 60 "$DHU" > "$ART/dhu.log" 2>&1 &
+    DHUPID=$!
+    sleep 15
+  fi
+  sleep 15
+  fi
   # pre-proof failure markers only (auth failure at link time); teardown lines
   # (disconnect/Exiting) are expected after our own kill and must not fail the gate
   if grep -qi 'auth failure' "$ART/dhu.log" 2>/dev/null; then
