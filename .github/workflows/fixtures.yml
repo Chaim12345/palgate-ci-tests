@@ -19,6 +19,9 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Scan repo for non-whitelisted secrets
+        run: python3 ci/scan_secrets.py
+
       - name: Validate gates.json fixture schema + synthetic markers
         run: python3 ci/validate_fixtures.py
 

@@ -19,11 +19,34 @@ def check(cond, msg):
         FAILS.append(msg)
 
 
+
+# Deterministic pin: the ONLY fixture identities/keys/MACs allowed. Any edit
+# (including accidentally pasting live account data) fails validation unless
+# this table is deliberately updated alongside the fixture.
+PINNED_GATES = [
+    {"id": "TEST000001", "name": "Test Gate A (SYNTHETIC)",
+     "key": "00112233445566778899AABBCCDDEEFF", "mac": "02:11:22:33:44:55"},
+    {"id": "TEST000002", "name": "Test Gate B (SYNTHETIC)",
+     "key": "FFEEDDCCBBAA99887766554433221100", "mac": "02:66:77:88:99:AA"},
+]
+
+
 def main():
     with open("assets/gates.json", encoding="utf-8") as f:
         doc = json.load(f)
 
     gates = doc.get("gates")
+
+    pinned = {p["id"]: p for p in PINNED_GATES}
+    check(sorted(pinned) == sorted(g["id"] for g in gates),
+          "gate id set must match PINNED_GATES exactly")
+    for g in gates:
+        p = pinned.get(g["id"])
+        if not p:
+            continue
+        for field in ("name", "key", "mac"):
+            check(str(g.get(field, "")).upper() == str(p[field]).upper(),
+                  f"{g['id']}: {field} differs from pinned synthetic value")
     check(isinstance(gates, list), "gates must be a list")
     if not isinstance(gates, list):
         return report()
@@ -57,7 +80,7 @@ def main():
             check(isinstance(g.get(flag), bool), f"{gid}: {flag} must be boolean")
         check(g.get("admin") is False, f"{gid}: fixture role is non-admin (secondary device)")
         check(g.get("mac") is None or (isinstance(g.get("mac"), str) and mac_re.match(g["mac"]) is not None),
-              f"{gid}: mac must be AA:BB:CC:DD:EE:FF or null")
+              f"{gid}: mac must be a MAC address or null")
         check(isinstance(g.get("relay"), str) and g["relay"].isdigit(),
               f"{gid}: relay must be a numeric string like '02'")
         check(isinstance(g.get("validUntil"), str) and iso_re.match(g["validUntil"]) is not None,

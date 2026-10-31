@@ -10,6 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Preflight secret scan (synthetic whitelist)
+        run: python3 ci/scan_secrets.py
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
