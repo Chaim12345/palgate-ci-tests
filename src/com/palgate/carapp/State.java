@@ -205,7 +205,7 @@ public final class State {
          *  0 = GPS geofence radius only
          *  1 = BLE RSSI threshold only (gate radio says we're at the barrier)
          *  2 = either */
-        public int triggerMode = TRIG_EITHER;
+        public int triggerMode = TRIG_BLE;
         public int rssiTrigDb = -75;    // auto-open when gate radio ≥ this
         public int rssi1m = -55;        // calibrated RSSI at 1 m from the gate
         public boolean trackCsv = true; // write the proximity track log
@@ -242,7 +242,7 @@ public final class State {
             p.requireBT = sp.getBoolean("requireBT", false);
             p.radiusM = sp.getInt("radiusM", 120);
             p.openMode = sp.getInt("openMode", MODE_PAL_NETWORK);
-            p.triggerMode = sp.getInt("triggerMode", TRIG_EITHER);
+            p.triggerMode = sp.getInt("triggerMode", TRIG_BLE);
             p.rssiTrigDb = sp.getInt("rssiTrigDb", -75);
             p.rssi1m = sp.getInt("rssi1m", -55);
             p.trackCsv = sp.getBoolean("trackCsv", true);
