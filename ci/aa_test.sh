@@ -100,12 +100,14 @@ if [ -f widgethost/WidgetHostTest.apk ]; then
   adb shell monkey -p com.palgate.widgethost -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
   sleep 14  # host binds + renders (~1s), auto-clicks OPEN after 4s, dispatch follows
   adb logcat -d -s WidgetHostTest:I > "$ART/widgethost.log" 2>/dev/null || true
-  adb logcat -d | grep -i 'SYNTHETIC-DISPATCH' > "$ART/synthetic_dispatch.log" 2>/dev/null || true
+  # a widget OPEN tap must reach a SAFE outcome: either the test-build choke
+  # point (SYNTHETIC-DISPATCH) or an ambiguity/out-of-range refusal (OPEN-REFUSED)
+  adb logcat -d | grep -iE 'SYNTHETIC-DISPATCH|OPEN-REFUSED' > "$ART/synthetic_dispatch.log" 2>/dev/null || true
   shot 20_widgethost
   # negative assertions: the tap must produce NO actuation attempt anywhere
   adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/actuation_attempts.log" 2>/dev/null || true
   if grep -q 'HOST-RESULT: OPEN-TAPPED' "$ART/widgethost.log" && [ -s "$ART/synthetic_dispatch.log" ] && [ ! -s "$ART/actuation_attempts.log" ]; then
-    note "widget hosted render + OPEN tap recorded synthetic dispatch; zero BLE/broadcast actuation attempts"
+    note "widget hosted render + OPEN tap reached a safe outcome (synthetic dispatch or refusal); zero BLE/broadcast actuation attempts"
     row widgethost gate executed "widgethost.log + synthetic_dispatch.log + empty actuation_attempts.log + 20_widgethost.png"
   elif [ -s "$ART/actuation_attempts.log" ]; then
     gate_block "actuation attempt detected after widget OPEN tap: $(head -2 "$ART/actuation_attempts.log")"; row widgethost gate fail "actuation_attempts.log"

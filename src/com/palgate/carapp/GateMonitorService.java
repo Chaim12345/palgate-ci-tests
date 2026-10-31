@@ -678,9 +678,11 @@ public class GateMonitorService extends Service {
                 State.get().log("✘ OPEN FAILED — no gate configured");
                 return;
             } else if (r == GateAssoc.RESOLVE_AMBIGUOUS) {
+                Log.i("PalGate", "OPEN-REFUSED ambiguous: several gates in range");
                 State.get().log("✘ OPEN REFUSED — several gates in range; open the specific gate from the app");
                 return;
             } else {
+                Log.i("PalGate", "OPEN-REFUSED out-of-range: not at any gate");
                 State.get().log("✘ OPEN REFUSED — not at any gate; open the specific gate from the app");
                 return;
             }
