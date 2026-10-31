@@ -55,6 +55,7 @@ public class GateLocalTest {
         testManualResolve();
         testApproachPolicy();
         testRadioLatch();
+        testRadioLatchFreshness();
         System.out.println(failures == 0 ? "ALL LOCAL TESTS PASS" : failures + " FAILURES");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -356,57 +357,103 @@ public class GateLocalTest {
                 == GateAssoc.RESOLVE_AMBIGUOUS, "stale/unqualified fix refused as ambiguous");
     }
 
+    static void below(RadioLatch l, String mac, long fromNs, long toNs) {
+        for (long t = fromNs; t <= toNs; t += 1000000000L) l.observe(mac, false, t);
+    }
+
+    static void above(RadioLatch l, String mac, long fromNs, long toNs) {
+        for (long t = fromNs; t <= toNs; t += 1000000000L) l.observe(mac, true, t);
+    }
+
     static void testRadioLatch() {
         long T0 = 1000000000000L, S = 1000000000L;
         String A = "02:11:22:33:44:55", B = "02:66:77:88:99:AA";
         RadioLatch l = new RadioLatch();
 
         // in range when the feature starts: never an instant fire
-        l.observe(A, true, T0);
-        l.observe(A, true, T0 + 10 * S);
+        above(l, A, T0, T0 + 10 * S);
         check(!l.mayFire(A, T0 + 10 * S, 3 * S), "in-range at enable stays latched (no instant fire)");
 
         // re-arm needs a SUSTAINED drop: 29 s below is not enough, 30 s is
-        l.observe(A, false, T0 + 11 * S);
-        l.observe(A, false, T0 + 40 * S);
+        below(l, A, T0 + 11 * S, T0 + 40 * S);
         check(!l.isArmed(A), "29 s below threshold does not re-arm");
-        l.observe(A, false, T0 + 41 * S + 1);
+        below(l, A, T0 + 41 * S, T0 + 41 * S);
         check(l.isArmed(A), "30 s sustained below arms");
 
         // fire needs a sustained 3 s above threshold
-        l.observe(A, true, T0 + 50 * S);
+        above(l, A, T0 + 50 * S, T0 + 52 * S);
         check(!l.mayFire(A, T0 + 52 * S, 3 * S), "2 s above threshold does not fire");
-        l.observe(A, true, T0 + 53 * S);
+        above(l, A, T0 + 53 * S, T0 + 53 * S);
         check(l.mayFire(A, T0 + 53 * S, 3 * S), "3 s sustained above fires");
 
         // after firing, a short fading dip re-arms nothing
         l.fire(A);
-        l.observe(A, false, T0 + 60 * S);
-        l.observe(A, true, T0 + 65 * S);
-        l.observe(A, true, T0 + 70 * S);
+        below(l, A, T0 + 60 * S, T0 + 64 * S);
+        above(l, A, T0 + 65 * S, T0 + 70 * S);
         check(!l.mayFire(A, T0 + 70 * S, 3 * S), "short fading dip does not re-arm after firing");
 
         // per-MAC independence
-        l.observe(B, false, T0);
-        l.observe(B, false, T0 + 31 * S);
+        below(l, B, T0, T0 + 31 * S);
         check(l.isArmed(B), "second radio arms on its own sustained drop");
-        l.observe(B, true, T0 + 80 * S);
+        above(l, B, T0 + 80 * S, T0 + 84 * S);
         check(l.mayFire(B, T0 + 84 * S, 3 * S), "second radio fires independently");
         check(!l.isArmed(A), "first radio stays latched");
 
         // an interrupted above-dwell restarts
         RadioLatch l2 = new RadioLatch();
-        l2.observe(A, false, T0);
-        l2.observe(A, false, T0 + 31 * S);
-        l2.observe(A, true, T0 + 40 * S);
-        l2.observe(A, false, T0 + 42 * S);
-        l2.observe(A, true, T0 + 43 * S);
+        below(l2, A, T0, T0 + 31 * S);
+        above(l2, A, T0 + 40 * S, T0 + 41 * S);
+        l2.observe(A, false, T0 + 42 * S);   // brief drop interrupts the dwell (< 30 s, stays armed)
+        above(l2, A, T0 + 43 * S, T0 + 45 * S);
         check(!l2.mayFire(A, T0 + 45 * S, 3 * S), "interrupted dwell restarts");
         check(l2.mayFire(A, T0 + 46 * S, 3 * S), "3 s after the interruption fires");
 
         // mode switch / auto-open toggle returns to latched
         l2.resetAll();
-        l2.observe(A, true, T0 + 50 * S);
+        above(l2, A, T0 + 50 * S, T0 + 60 * S);
         check(!l2.mayFire(A, T0 + 60 * S, 3 * S), "mode switch/toggle cannot bypass arming");
+    }
+
+    static void testRadioLatchFreshness() {
+        long T0 = 2000000000000L, S = 1000000000L;
+        String A = "02:11:22:33:44:55", B = "02:66:77:88:99:AA";
+
+        // interleaved MACs on an active scan: both arm on absence, then A alone dwells and fires
+        RadioLatch l = new RadioLatch();
+        for (int i = 0; i <= 31; i++) {
+            l.observe(A, false, T0 + i * S);
+            l.observe(B, false, T0 + i * S);
+        }
+        check(l.isArmed(A) && l.isArmed(B), "both arm on 30 s of active-scan absence");
+        for (int i = 32; i <= 36; i++) {
+            l.observe(A, true, T0 + i * S);
+            l.observe(B, false, T0 + i * S);
+        }
+        check(l.mayFire(A, T0 + 36 * S, 3 * S), "interleaved: A dwells and fires while B stays absent");
+        check(!l.mayFire(B, T0 + 36 * S, 3 * S), "interleaved: B armed but not above threshold");
+
+        // a sighting gap expires the above-dwell (pause/stale is not continuity)
+        RadioLatch g = new RadioLatch();
+        below(g, A, T0, T0 + 31 * S);
+        above(g, A, T0 + 32 * S, T0 + 33 * S);
+        g.observe(A, true, T0 + 40 * S);   // 7 s gap
+        check(!g.mayFire(A, T0 + 40 * S, 3 * S), "sighting gap expires the above-dwell");
+        above(g, A, T0 + 41 * S, T0 + 43 * S);
+        check(g.mayFire(A, T0 + 43 * S, 3 * S), "dwell restarts after the gap and then fires");
+
+        // a gap inside the below window does not count toward arming (pause is not departure)
+        RadioLatch h = new RadioLatch();
+        h.observe(A, false, T0);
+        h.observe(A, false, T0 + 25 * S);   // gap: below clock restarts here
+        below(h, A, T0 + 26 * S, T0 + 54 * S);
+        check(!h.isArmed(A), "gap inside the below window does not count toward arming");
+        below(h, A, T0 + 55 * S, T0 + 55 * S);
+        check(h.isArmed(A), "30 s of continuous below observations after the gap arm");
+
+        // freshness at fire time: dwell met but the last sighting is stale
+        RadioLatch k = new RadioLatch();
+        below(k, A, T0, T0 + 31 * S);
+        above(k, A, T0 + 32 * S, T0 + 35 * S);
+        check(!k.mayFire(A, T0 + 39 * S, 3 * S), "stale last sighting cannot fire");
     }
 }

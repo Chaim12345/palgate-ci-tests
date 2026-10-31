@@ -619,7 +619,6 @@ public class GateMonitorService extends Service {
             s.rssiEstM = estM;
             s.rssiAtMs = System.currentTimeMillis();
             State.Prefs p = State.Prefs.get();
-            State.get().radioLatch.observe(mac, rssi >= p.rssiTrigDb, SystemClock.elapsedRealtimeNanos());
             if (p.triggerMode != State.TRIG_GPS && rssi >= p.rssiTrigDb
                     && (!rssiFired || p.approachMode == State.Prefs.APPROACH_BLE_ONLY)) {
                 // Wrong-gate guard: the radio must be bound to a gate on this
@@ -702,8 +701,23 @@ public class GateMonitorService extends Service {
             State.get().notifyListeners();
         }
 
+        /** Actual per-radio sightings from the active scan - the ONLY feed for
+         *  the Bluetooth-only latch. Bound radios absent from a batch are
+         *  observed below-threshold; a paused/dead scan sends nothing, and the
+         *  latch's own gap rule (OBS_GAP_NS) resets its clocks. */
+        @Override public void onSightings(java.util.List<BleRssiScanner.Sighting> batch) {
+            long nowNs = SystemClock.elapsedRealtimeNanos();
+            int thr = State.Prefs.get().rssiTrigDb;
+            for (String mac : State.Prefs.macMap(GateMonitorService.this).keySet()) {
+                BleRssiScanner.Sighting seen = null;
+                for (BleRssiScanner.Sighting sg : batch) {
+                    if (sg.mac.equals(mac)) { seen = sg; break; }
+                }
+                State.get().radioLatch.observe(mac, seen != null && seen.rssi >= thr, nowNs);
+            }
+        }
+
         @Override public void onNothingSeen() {
-            State.get().radioLatch.observeAllBelow(SystemClock.elapsedRealtimeNanos());
             State s = State.get();
             if (s.rssi != 127) {
                 s.rssi = 127;

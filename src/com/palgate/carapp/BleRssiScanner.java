@@ -43,6 +43,9 @@ public final class BleRssiScanner {
         /** Strongest fresh PalGate advertisement. rssi is EWMA-smoothed. */
         void onProximity(int rssi, String mac, String name, double estM);
 
+        /** Actual radios heard in the last ~1 s scan window (empty = scan ran, nothing heard). */
+        void onSightings(java.util.List<Sighting> batch);
+
         /** Nothing PalGate-like visible in the last few seconds. */
         void onNothingSeen();
     }
@@ -57,9 +60,21 @@ public final class BleRssiScanner {
     private final Handler main = new Handler(Looper.getMainLooper());
 
     // mac -> {ewmaRssi} / lastSeenMs / advertised name — main thread only
+    // freshRssi: ACTUAL scan results since the last tick (never the EWMA cache)
     private final Map<String, double[]> ewma = new HashMap<String, double[]>();
     private final Map<String, Long> seenAt = new HashMap<String, Long>();
     private final Map<String, String> names = new HashMap<String, String>();
+    private final Map<String, Integer> freshRssi = new HashMap<String, Integer>();
+
+    /** One radio actually heard in the latest scan window (not cached state). */
+    public static final class Sighting {
+        public final String mac;
+        public final int rssi;
+        public final String name;
+        Sighting(String mac, int rssi, String name) {
+            this.mac = mac; this.rssi = rssi; this.name = name == null ? "" : name;
+        }
+    }
 
     private BluetoothAdapter adapter;
     private boolean running;          // scanning is wanted
@@ -188,6 +203,8 @@ public final class BleRssiScanner {
                 .build();
         try {
             adapter.getBluetoothLeScanner().startScan(palFilters(ctx), st, scanCb);
+            main.removeCallbacks(tick);
+            main.postDelayed(tick, 1000);
             State.get().log("gate-radio scan " + (nearMode ? "LOW_LATENCY" : "LOW_POWER") + " on");
         } catch (Exception e) {
             State.get().log("gate-radio scan failed: " + e.getClass().getSimpleName());
@@ -196,6 +213,7 @@ public final class BleRssiScanner {
     }
 
     private void stopScan() {
+        main.removeCallbacks(tick);
         try {
             if (adapter != null && adapter.getBluetoothLeScanner() != null) {
                 adapter.getBluetoothLeScanner().stopScan(scanCb);
@@ -203,6 +221,22 @@ public final class BleRssiScanner {
         } catch (Exception ignored) {
         }
     }
+
+    /** While scanning is active, report the radios ACTUALLY heard in the last
+     *  second (empty when none): this heartbeat - not cached table state - is
+     *  the only evidence of presence or absence for the auto-open latch. */
+    private final Runnable tick = new Runnable() {
+        @Override public void run() {
+            if (!isRunning()) return;
+            List<Sighting> batch = new ArrayList<Sighting>();
+            for (Map.Entry<String, Integer> en : freshRssi.entrySet()) {
+                batch.add(new Sighting(en.getKey(), en.getValue(), names.get(en.getKey())));
+            }
+            freshRssi.clear();
+            if (cb != null) cb.onSightings(batch);
+            main.postDelayed(this, 1000);
+        }
+    };
 
     // ------------------------------------------------------------- results --
 
@@ -236,6 +270,7 @@ public final class BleRssiScanner {
             return;
         }
         String mac = r.getDevice().getAddress();
+        freshRssi.put(mac, r.getRssi());   // actual sample for the tick batch
         double[] e = ewma.get(mac);
         double v = e == null ? r.getRssi() : e[0] + 0.35 * (r.getRssi() - e[0]);
         ewma.put(mac, new double[]{v});
