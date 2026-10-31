@@ -30,3 +30,16 @@ jobs:
           mkdir -p out
           javac -encoding UTF-8 -d out src/com/palgate/carapp/GateCrypto.java test/GateCryptoKat.java
           java -cp out GateCryptoKat
+
+      - name: Android-free app behavior tests (fixture load/defaults/overrides/geo/gate-side CR roundtrip)
+        run: |
+          mkdir -p out2
+          javac -encoding UTF-8 -cp tools/json-20240303.jar -d out2 \
+            test/stubs/android/content/res/AssetManager.java \
+            test/stubs/android/content/SharedPreferences.java \
+            test/stubs/android/content/Context.java \
+            test/stubs/android/util/Log.java \
+            src/com/palgate/carapp/GateCrypto.java \
+            src/com/palgate/carapp/Gate.java \
+            test/GateLocalTest.java
+          java -cp out2:tools/json-20240303.jar GateLocalTest

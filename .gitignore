@@ -7,3 +7,5 @@ PalGateCar.apk
 PalGateCar.apk.idsig
 *.apk
 !tools/*.jar
+out/
+out2/
