@@ -130,7 +130,7 @@ public final class State {
 
     // ---------------------------------------------------------- readouts --
 
-    /** "Gate 1 — 84 m ±9" — the honest live distance incl. fix quality. */
+    /** e.g. "Test Gate A - 84 m +/-9" - honest live distance incl. fix quality. */
     public String distanceText() {
         if (nearest == null) return "no gate configured";
         if (!hasFix || nearestDistM == Double.MAX_VALUE) return "waiting for GPS…";

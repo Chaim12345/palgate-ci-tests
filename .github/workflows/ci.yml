@@ -17,8 +17,9 @@ jobs:
 
       - name: Install SDK components
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools" "emulator"
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SM" --licenses >/dev/null || true
+          "$SM" "platforms;android-34" "build-tools;34.0.0" "platform-tools" "emulator"
 
       - name: Fetch androidx deps and build APK
         env:
