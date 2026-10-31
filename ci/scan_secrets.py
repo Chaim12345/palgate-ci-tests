@@ -10,6 +10,11 @@ os.chdir(ROOT)
 
 SKIP_DIRS = ("tools/", ".git/")
 SKIP_EXT = (".jar", ".zip", ".png", ".jpg", ".so", ".bin")
+# Raw, unfiltered device logs contain framework/other-app noise that is shaped
+# like a secret (keystore aliases, signing-cert fingerprints), so they are not
+# scannable as app output. They are forensic artifacts only; the app's own
+# filtered log (logcat_palgate.txt) is still scanned.
+SKIP_NAMES = ("logcat_full.txt",)
 
 def load_whitelist():
     wl = set()
@@ -37,6 +42,8 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--dir":
     for base, dirs, names in os.walk(root):
         dirs[:] = [d for d in dirs if not d.startswith(".git")]
         for n in names:
+            if n in SKIP_NAMES:
+                continue
             files.append(os.path.join(base, n))
 else:
     files = subprocess.run(["git", "ls-files"], capture_output=True, text=True).stdout.split()
