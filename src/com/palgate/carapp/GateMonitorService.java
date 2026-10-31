@@ -619,7 +619,9 @@ public class GateMonitorService extends Service {
             s.rssiEstM = estM;
             s.rssiAtMs = System.currentTimeMillis();
             State.Prefs p = State.Prefs.get();
-            if (p.triggerMode != State.TRIG_GPS && !rssiFired && rssi >= p.rssiTrigDb) {
+            State.get().radioLatch.observe(mac, rssi >= p.rssiTrigDb, SystemClock.elapsedRealtimeNanos());
+            if (p.triggerMode != State.TRIG_GPS && rssi >= p.rssiTrigDb
+                    && (!rssiFired || p.approachMode == State.Prefs.APPROACH_BLE_ONLY)) {
                 // Wrong-gate guard: the radio must be bound to a gate on this
                 // phone. PalGate units share service UUIDs, so a neighbor's
                 // gate (or the second gate 3 m away) looks identical until
@@ -643,6 +645,29 @@ public class GateMonitorService extends Service {
                 }
                 if (s.lastOpenAtMs > 0
                         && System.currentTimeMillis() - s.lastOpenAtMs < OPEN_COOLDOWN_MS) {
+                    State.get().notifyListeners();
+                    return;
+                }
+                if (p.approachMode == State.Prefs.APPROACH_BLE_ONLY) {
+                    // Bluetooth-only (user-enabled, risk accepted): no GPS
+                    // requirement. The bound radio must have been away for a
+                    // sustained 30 s at some point (arming) and must now hold
+                    // above threshold for a sustained 3 s. Per-MAC latch;
+                    // re-arm only on its own sustained drop, never on a timer.
+                    long nowNs = SystemClock.elapsedRealtimeNanos();
+                    if (!State.get().radioLatch.mayFire(mac, nowNs, 3_000_000_000L)) {
+                        skipLogOnce(State.get().radioLatch.isArmed(mac)
+                                ? "gate radio present — waiting for a sustained signal"
+                                : "Bluetooth-only mode arming — the gate radio must be away ~30 s first");
+                        State.get().notifyListeners();
+                        return;
+                    }
+                    State.get().radioLatch.fire(mac);
+                    State.get().log(String.format(Locale.ROOT,
+                            "gate radio %d dBm ≥ %d dBm sustained (≈%.0f m) — auto open %s (Bluetooth-only)",
+                            rssi, p.rssiTrigDb, estM, bound.name));
+                    csv("rssi-trig");
+                    maybeAutoOpen("ble", s.accuracy, s.speed, bound);
                     State.get().notifyListeners();
                     return;
                 }
@@ -678,6 +703,7 @@ public class GateMonitorService extends Service {
         }
 
         @Override public void onNothingSeen() {
+            State.get().radioLatch.observeAllBelow(SystemClock.elapsedRealtimeNanos());
             State s = State.get();
             if (s.rssi != 127) {
                 s.rssi = 127;

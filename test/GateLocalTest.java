@@ -3,6 +3,7 @@ import android.content.SharedPreferences;
 import com.palgate.carapp.Gate;
 import com.palgate.carapp.Approach;
 import com.palgate.carapp.GateAssoc;
+import com.palgate.carapp.RadioLatch;
 import com.palgate.carapp.GateCrypto;
 
 import java.io.File;
@@ -53,6 +54,7 @@ public class GateLocalTest {
         testGateAssociation();
         testManualResolve();
         testApproachPolicy();
+        testRadioLatch();
         System.out.println(failures == 0 ? "ALL LOCAL TESTS PASS" : failures + " FAILURES");
         System.exit(failures == 0 ? 0 : 1);
     }
@@ -352,5 +354,59 @@ public class GateLocalTest {
         pair.add(mk(32.00003, 34.0));
         check(GateAssoc.resolveManual(pair, false, 32.0, 34.0, 40, new Gate[1])
                 == GateAssoc.RESOLVE_AMBIGUOUS, "stale/unqualified fix refused as ambiguous");
+    }
+
+    static void testRadioLatch() {
+        long T0 = 1000000000000L, S = 1000000000L;
+        String A = "02:11:22:33:44:55", B = "02:66:77:88:99:AA";
+        RadioLatch l = new RadioLatch();
+
+        // in range when the feature starts: never an instant fire
+        l.observe(A, true, T0);
+        l.observe(A, true, T0 + 10 * S);
+        check(!l.mayFire(A, T0 + 10 * S, 3 * S), "in-range at enable stays latched (no instant fire)");
+
+        // re-arm needs a SUSTAINED drop: 29 s below is not enough, 30 s is
+        l.observe(A, false, T0 + 11 * S);
+        l.observe(A, false, T0 + 40 * S);
+        check(!l.isArmed(A), "29 s below threshold does not re-arm");
+        l.observe(A, false, T0 + 41 * S + 1);
+        check(l.isArmed(A), "30 s sustained below arms");
+
+        // fire needs a sustained 3 s above threshold
+        l.observe(A, true, T0 + 50 * S);
+        check(!l.mayFire(A, T0 + 52 * S, 3 * S), "2 s above threshold does not fire");
+        l.observe(A, true, T0 + 53 * S);
+        check(l.mayFire(A, T0 + 53 * S, 3 * S), "3 s sustained above fires");
+
+        // after firing, a short fading dip re-arms nothing
+        l.fire(A);
+        l.observe(A, false, T0 + 60 * S);
+        l.observe(A, true, T0 + 65 * S);
+        l.observe(A, true, T0 + 70 * S);
+        check(!l.mayFire(A, T0 + 70 * S, 3 * S), "short fading dip does not re-arm after firing");
+
+        // per-MAC independence
+        l.observe(B, false, T0);
+        l.observe(B, false, T0 + 31 * S);
+        check(l.isArmed(B), "second radio arms on its own sustained drop");
+        l.observe(B, true, T0 + 80 * S);
+        check(l.mayFire(B, T0 + 84 * S, 3 * S), "second radio fires independently");
+        check(!l.isArmed(A), "first radio stays latched");
+
+        // an interrupted above-dwell restarts
+        RadioLatch l2 = new RadioLatch();
+        l2.observe(A, false, T0);
+        l2.observe(A, false, T0 + 31 * S);
+        l2.observe(A, true, T0 + 40 * S);
+        l2.observe(A, false, T0 + 42 * S);
+        l2.observe(A, true, T0 + 43 * S);
+        check(!l2.mayFire(A, T0 + 45 * S, 3 * S), "interrupted dwell restarts");
+        check(l2.mayFire(A, T0 + 46 * S, 3 * S), "3 s after the interruption fires");
+
+        // mode switch / auto-open toggle returns to latched
+        l2.resetAll();
+        l2.observe(A, true, T0 + 50 * S);
+        check(!l2.mayFire(A, T0 + 60 * S, 3 * S), "mode switch/toggle cannot bypass arming");
     }
 }

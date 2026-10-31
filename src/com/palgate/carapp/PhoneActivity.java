@@ -274,7 +274,11 @@ public class PhoneActivity extends Activity implements State.Listener {
 
         final State.Prefs p = State.Prefs.get();
         addToggle(root, "auto-open when trigger fires", p.autoOpen, new ToggleCb() {
-            @Override public void set(boolean v) { p.autoOpen = v; State.Prefs.save(PhoneActivity.this); }
+            @Override public void set(boolean v) {
+                p.autoOpen = v;
+                State.Prefs.save(PhoneActivity.this);
+                State.get().radioLatch.resetAll();   // enabling never fires on the spot
+            }
         });
         TextView autoRisk = new TextView(this);
         autoRisk.setText("When ON: opens via direct BLE when your BOUND gate radio crosses the "
@@ -285,6 +289,23 @@ public class PhoneActivity extends Activity implements State.Listener {
         autoRisk.setTextSize(11);
         autoRisk.setPadding(dp(6), 0, dp(6), dp(6));
         root.addView(autoRisk);
+        addToggle(root, "Bluetooth-only auto-open (no location check)",
+                p.approachMode == State.Prefs.APPROACH_BLE_ONLY, new ToggleCb() {
+            @Override public void set(boolean v) {
+                p.approachMode = v ? State.Prefs.APPROACH_BLE_ONLY : State.Prefs.APPROACH_GPS;
+                State.Prefs.save(PhoneActivity.this);
+                State.get().radioLatch.resetAll();   // a mode flip never fires on the spot
+            }
+        });
+        TextView bleRisk = new TextView(this);
+        bleRisk.setText("Bluetooth-only: opens when the bound gate radio stays above the "
+                + "threshold for ~3 s, no GPS needed (works indoors). Risk: a copied or "
+                + "relayed radio identity can trigger it, and ordinary signal fading at "
+                + "home can re-arm it - the gate may open while you are not approaching. "
+                + "Leaving this OFF keeps location-verified approach, which is safer.");
+        bleRisk.setTextSize(11);
+        bleRisk.setPadding(dp(6), 0, dp(6), dp(6));
+        root.addView(bleRisk);
         addToggle(root, "require Android Auto connected", p.requireAA, new ToggleCb() {
             @Override public void set(boolean v) { p.requireAA = v; State.Prefs.save(PhoneActivity.this); }
         });

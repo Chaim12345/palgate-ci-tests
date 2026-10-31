@@ -43,5 +43,6 @@ jobs:
             src/com/palgate/carapp/Gate.java \
             src/com/palgate/carapp/GateAssoc.java \
             src/com/palgate/carapp/Approach.java \
+            src/com/palgate/carapp/RadioLatch.java \
             test/GateLocalTest.java
           java -cp out2:tools/json-20240303.jar GateLocalTest

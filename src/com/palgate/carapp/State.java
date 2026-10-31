@@ -151,6 +151,9 @@ public final class State {
         return speed > 0.5f ? "holding distance" : "stopped";
     }
 
+    /** Per-radio dwell/latch for Bluetooth-only auto-open (runtime only). */
+    public final RadioLatch radioLatch = new RadioLatch();
+
     /** Gate radio proximity from BLE RSSI. */
     public String radioText() {
         if (rssi >= 127 || System.currentTimeMillis() - rssiAtMs > 10000) {
@@ -188,6 +191,11 @@ public final class State {
         public boolean autoOpen = false;
         public boolean requireAA = false;
         public boolean requireBT = false;
+
+        /** Automatic-open approach verification: GPS-verified (default) or radio-only. */
+        public static final int APPROACH_GPS = 0;
+        public static final int APPROACH_BLE_ONLY = 1;
+        public int approachMode = APPROACH_GPS;
         public int radiusM = 120;
 
         /** How the gate is opened.
@@ -247,6 +255,7 @@ public final class State {
             p.rssi1m = sp.getInt("rssi1m", -55);
             p.trackCsv = sp.getBoolean("trackCsv", true);
             p.approachFilter = sp.getBoolean("approachFilter", false);
+            p.approachMode = sp.getInt("approachMode", APPROACH_GPS);
 
             // Walk-up build policy: GPS-only / either triggers are disabled
             // (GPS cannot discriminate gates a few meters apart) and auto-open
@@ -276,6 +285,7 @@ public final class State {
                     .putInt("rssi1m", p.rssi1m)
                     .putBoolean("trackCsv", p.trackCsv)
                     .putBoolean("approachFilter", p.approachFilter)
+                    .putInt("approachMode", p.approachMode)
                     .apply();
         }
 
