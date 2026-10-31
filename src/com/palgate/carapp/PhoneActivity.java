@@ -282,7 +282,7 @@ public class PhoneActivity extends Activity implements State.Listener {
         });
         TextView autoRisk = new TextView(this);
         autoRisk.setText("When ON: opens via direct BLE when your BOUND gate radio crosses the "
-                + "threshold while you are approaching (one shot per approach, 45 s cooldown). "
+                + "threshold while you are approaching (one shot per arm/fire cycle - sustained signal fading can re-arm it - 45 s cooldown). "
                 + "Residual risk: the radio is never authenticated TO the phone, so a relay/"
                 + "spoof device near home could still trigger it. The safe default is OFF "
                 + "with the per-gate OPEN buttons. Continuous nearby radio scanning (needed "

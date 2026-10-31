@@ -84,6 +84,13 @@ adb emu geo fix 34.7818 32.0853 >/dev/null 2>&1 && note "geo fix set (synthetic 
 adb shell monkey -p com.palgate.carapp -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 6
 shot 01_palgate_phone
 ui_has "PalGate" && note "PalGate phone UI visible" || true
+# capture the policy + binding controls (settings toggles / risk text / GATES section)
+scrollup; scrollup; shot 01b_palgate_settings
+scrollup; scrollup; shot 01c_palgate_gates
+adb shell input swipe $CX $QY $CX $LY 300 >/dev/null 2>&1; sleep 1
+adb shell input swipe $CX $QY $CX $LY 300 >/dev/null 2>&1; sleep 1
+adb shell input swipe $CX $QY $CX $LY 300 >/dev/null 2>&1; sleep 1
+shot 01a_palgate_top
 
 echo "-- gate: widget hosted render + OPEN dispatch (WidgetHostTest) --"
 # car-compat source guard: widget taps must be service/broadcast PendingIntents only -
