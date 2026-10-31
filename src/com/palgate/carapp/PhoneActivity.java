@@ -326,10 +326,11 @@ public class PhoneActivity extends Activity implements State.Listener {
         root.addView(label("GATES — bundled gates ship keyless; keys you enter stay on this phone (private storage, backup off)"));
         TextView bindHow = new TextView(this);
         bindHow.setText("Binding the RIGHT radio (two gates are near each other): stand 1-2 m AT "
-                + "the gate. If a radio's advertised name matches the gate's serial, the button "
-                + "says so - that one is certain. Otherwise the strongest reading is only a HINT, "
-                + "not proof: bind it, then with auto-open OFF tap that gate's OPEN while standing "
-                + "at it - if the wrong gate opens, unbind and bind the other radio. Repeat for "
+                + "the gate. If a radio's advertised name matches the gate's serial the button "
+                + "says so - a good sign, but names can be imitated, so it is still UNVERIFIED. "
+                + "The strongest reading is likewise only a hint, never proof. Either way the "
+                + "actual check is: with auto-open OFF, tap that gate's OPEN while standing at "
+                + "it - if the wrong gate opens, unbind and bind the other radio. Repeat for "
                 + "the other gate. Only enable auto-open after both bindings are verified.");
         bindHow.setTextSize(11);
         bindHow.setPadding(dp(6), 0, dp(6), dp(6));
@@ -393,7 +394,7 @@ public class PhoneActivity extends Activity implements State.Listener {
                 Button bind = new Button(this);
                 bind.setText("bind " + (advName.isEmpty() ? "radio " : advName + " / ")
                         + stNow.rssiMac + " (" + stNow.rssi + " dBm) → " + g.name
-                        + (serialMatch ? " ✓ serial matches" : " (tentative)"));
+                        + (serialMatch ? " · name=serial (unverified)" : " (tentative)"));
                 if (stNow.rssi < -67 && !serialMatch) {
                     bind.setEnabled(false);
                     bind.setText("too far to bind (" + stNow.rssi + " dBm) — stand 1-2 m from " + g.name);
