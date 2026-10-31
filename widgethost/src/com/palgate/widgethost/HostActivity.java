@@ -59,10 +59,13 @@ public class HostActivity extends Activity {
         set("HOST-RESULT: RENDERED provider=" + info.provider);
         Log.i(TAG, "widget rendered, scheduling auto-click");
 
-        new Handler().postDelayed(() -> {
-            boolean clicked = clickFirst(view);
-            Log.i(TAG, "auto-click result=" + clicked);
-            set("HOST-RESULT: " + (clicked ? "TAPPED" : "NO-CLICKABLE"));
+        final AppWidgetHostView fv = view;
+        new Handler().postDelayed(new Runnable() {
+            @Override public void run() {
+                boolean clicked = clickFirst(fv);
+                Log.i(TAG, "auto-click result=" + clicked);
+                set("HOST-RESULT: " + (clicked ? "TAPPED" : "NO-CLICKABLE"));
+            }
         }, 4000);
     }
 
