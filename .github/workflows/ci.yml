@@ -74,7 +74,10 @@ jobs:
           RUN_DHU: ${{ (contains(github.event.head_commit.message, '[dhu-run]') || github.event_name == 'workflow_dispatch') && '1' || '0' }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 30
+          # API 34 Play image: ships a modern Android Auto (gearhead) whose
+          # protocol matches the DHU; the API 30 image's AA 5.3 failed the
+          # DHU link auth (protocol 1.5 vs 1.7).
+          api-level: 34
           target: google_apis_playstore
           arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 3072

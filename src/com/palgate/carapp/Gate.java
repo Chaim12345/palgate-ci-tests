@@ -105,7 +105,7 @@ public class Gate {
     // ------------------------------------------------------------ loading --
     // gates.json is baked into assets (read-only); on-site position calibration
     // is stored as an override layer in SharedPreferences. The list is cached
-    // in memory — MapScreen redraws several times a second and must not
+    // in memory — the car screen re-renders frequently and must not
     // re-parse the asset per frame.
 
     private static final String PREFS = "palgate_car";

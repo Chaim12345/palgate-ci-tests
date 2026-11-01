@@ -9,7 +9,7 @@ import androidx.car.app.validation.HostValidator;
 import androidx.lifecycle.DefaultLifecycleObserver;
 import androidx.lifecycle.LifecycleOwner;
 
-/** Android Auto entry point (template host binds this, NAVIGATION category). */
+/** Android Auto entry point (template host binds this, IoT category - gate/garage control). */
 public class GateCarAppService extends CarAppService {
 
     @Override
@@ -53,7 +53,7 @@ public class GateCarAppService extends CarAppService {
                 State.get().log("could not start monitor from car UI (" + e.getClass().getSimpleName()
                         + ") — start it from the phone app");
             }
-            return new MapScreen(getCarContext());
+            return new GateGridScreen(getCarContext());
         }
 
         @Override
