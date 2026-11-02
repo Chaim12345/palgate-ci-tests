@@ -73,4 +73,14 @@ fi
   --out "$SRC/PalGateCar.apk" "$OUT/aligned.apk"
 
 "$BT/apksigner" verify --print-certs "$SRC/PalGateCar.apk" | head -2
+
+echo "== manifest/resource assertions (review fixes) =="
+"$BT/aapt2" dump xmltree --file AndroidManifest.xml "$SRC/PalGateCar.apk" > "$OUT/manifest.txt"
+grep -A1 'androidx.car.app.minCarApiLevel' "$OUT/manifest.txt" | grep -qE '=1$|0x1$' \
+  || { echo "FAIL: androidx.car.app.minCarApiLevel=1 metadata missing from APK"; exit 1; }
+echo "ok: minCarApiLevel=1 present in built APK"
+"$BT/aapt2" dump resources "$SRC/PalGateCar.apk" | grep -q 'hosts_allowlist' \
+  || { echo "FAIL: hosts_allowlist array missing from APK resources"; exit 1; }
+echo "ok: hosts_allowlist resource present in built APK"
+
 echo "== done: $SRC/PalGateCar.apk =="

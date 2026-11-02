@@ -12,6 +12,7 @@ on:
       - 'build.sh'
       - 'ci/aa_test.sh'
       - 'ci/aare_test.sh'
+      - 'ci/palgate_render.sh'
       - 'ci/encoder_probe.sh'
       - 'encoderprobe/**'
       - 'ci/synthetic_whitelist.txt'
@@ -264,12 +265,21 @@ jobs:
           adb -s localhost:5555 shell getprop ro.build.version.release
           adb -s localhost:5555 shell getprop ro.product.cpu.abi
 
-      - name: Run AARE host lane against the redroid phone
+      # HELD 2026-11-02 (parent direction): encode wedge lane + encoder probe.
+      # The zero-frame wedge is consolidated across every stack tried; no more
+      # encoder CI launches until the hold is lifted. Steps kept for resume.
+      - name: "HELD: AARE encode lane (wedge consolidated; hold 2026-11-02)"
+        if: false
         run: AARE_DIR="$PWD" AARE_LAYOUT=dist bash ./ci/aare_test.sh
 
-      - name: Run encoder probe against the redroid phone
-        if: always()
+      - name: "HELD: encoder probe on redroid (hold 2026-11-02)"
+        if: false
         run: bash ./ci/encoder_probe.sh
+
+      # Authorized bounded lane: encoder-free launcher/local-preview render
+      # proof of the PalGate template through AARE's local car runtime.
+      - name: PalGate launcher/local-preview render proof (AARE, third-party host)
+        run: AARE_DIR="$PWD" AARE_LAYOUT=dist bash ./ci/palgate_render.sh
 
       - name: Scan artifact staging for secrets before upload
         if: always()
@@ -287,7 +297,9 @@ jobs:
   # Same standalone probe on the Google emulator image where the AARE wedge is
   # fully documented (API 34): discriminates codec-stack vs AARE-app behavior
   # with guaranteed-animated synthetic input. Synthetic content only.
+  # HELD 2026-11-02 (parent direction): no more encoder CI launches.
   encoder-probe-x86:
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: aare-build

@@ -70,5 +70,16 @@
         <!-- discovered by the Android Auto host -->
         <meta-data android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc"/>
+
+        <!-- Minimum Car App API level this app handles. Grounded: every CAL
+             API used (GridTemplate, GridItem.setImage(icon, IMAGE_TYPE_ICON),
+             ItemList, Action.APP_ICON, CarToast, HostValidator) is car API
+             level 1; no @RequiresCarApi >= 2 member is referenced (levels 7-9
+             members - badges, progress bars, item sizing - are unused).
+             If absent, the library assumes the app needs the LATEST API level
+             known at compile time (AppInfo.MIN_API_LEVEL_METADATA_KEY doc),
+             needlessly narrowing host compatibility. -->
+        <meta-data android:name="androidx.car.app.minCarApiLevel"
+            android:value="1"/>
     </application>
 </manifest>

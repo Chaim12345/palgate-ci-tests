@@ -18,16 +18,38 @@ public class GateCarAppService extends CarAppService {
     }
 
     /**
-     * Accept any car-app host. For a personal sideloaded tool this is the
-     * robust choice (AA host signature keys rotate); a store-distributed app
-     * should instead use an allowlist of host signatures.
+     * Host validation, scoped by build type:
+     * <ul>
+     *   <li>TEST builds (assets/test_build.marker, injected only by
+     *       build.sh TEST_BUILD=1 - the same marker that disables actuation
+     *       at the GateMonitorService choke) accept any host, so third-party
+     *       test hosts (AARE in CI, DHU) can bind.</li>
+     *   <li>Production builds validate against R.array.hosts_allowlist, the
+     *       official Google host certs published inside androidx.car.app
+     *       itself (hosts_allowlist_sample in app-1.4.0.aar). An arbitrary
+     *       binding host can no longer reach the OPEN intent: without
+     *       validation any installed app could bind CarAppService and tap
+     *       grid items (cooldowns are rate limiting, not authorization).</li>
+     * </ul>
      */
     @Override
     public HostValidator createHostValidator() {
-        // Personal sideloaded tool: accept any host (AA host signing keys rotate).
-        // For distribution, use new HostValidator.Builder(this)
-        //     .addAllowedHosts(R.array.hosts_allowlist).build();
-        return HostValidator.ALLOW_ALL_HOSTS_VALIDATOR;
+        if (isTestBuild()) {
+            return HostValidator.ALLOW_ALL_HOSTS_VALIDATOR;
+        }
+        return new HostValidator.Builder(this)
+                .addAllowedHosts(R.array.hosts_allowlist)
+                .build();
+    }
+
+    /** The marker asset exists only in builds made with TEST_BUILD=1. */
+    private boolean isTestBuild() {
+        try {
+            getAssets().open("test_build.marker").close();
+            return true;
+        } catch (java.io.IOException e) {
+            return false;
+        }
     }
 
     /** One session = one car connection. Its lifecycle gates the monitor FGS. */

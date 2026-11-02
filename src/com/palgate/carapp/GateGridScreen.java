@@ -15,6 +15,9 @@ import androidx.car.app.model.ItemList;
 import androidx.car.app.model.Template;
 import androidx.core.graphics.drawable.IconCompat;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -33,6 +36,9 @@ import java.util.Locale;
  * Template updates are throttled to ~1/s (hosts rate-limit invalidations).
  */
 public class GateGridScreen extends Screen implements State.Listener {
+
+    /** androidx.car.app:app:1.4.0 content_limit_grid (res/values/values.xml). */
+    private static final int MAX_GRID_ITEMS = 6;
 
     private long lastInvalidateAt;
     private boolean invalidateQueued;
@@ -57,7 +63,25 @@ public class GateGridScreen extends Screen implements State.Listener {
                     .setImage(icon(), GridItem.IMAGE_TYPE_ICON)
                     .build());
         } else {
-            for (final Gate g : gates) {
+            // Hosts enforce the library's grid content limit
+            // (content_limit_grid = 6 in androidx.car.app:app:1.4.0
+            // res/values/values.xml); exceeding it makes the host reject the
+            // whole template. Nearest-first when a GPS fix exists, capped at
+            // 6 - the full gate list stays available in the phone app.
+            List<Gate> show = new ArrayList<>(gates);
+            if (s.hasFix) {
+                final double lat = s.lat;
+                final double lng = s.lng;
+                Collections.sort(show, new Comparator<Gate>() {
+                    @Override public int compare(Gate a, Gate b) {
+                        return Double.compare(a.distanceM(lat, lng), b.distanceM(lat, lng));
+                    }
+                });
+            }
+            if (show.size() > MAX_GRID_ITEMS) {
+                show = show.subList(0, MAX_GRID_ITEMS);
+            }
+            for (final Gate g : show) {
                 list.addItem(new GridItem.Builder()
                         .setTitle(g.name)
                         .setText(subtitle(s, g))
