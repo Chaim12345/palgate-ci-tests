@@ -61,6 +61,22 @@ jobs:
           name: PalGateCar-TEST-no-actuation
           path: PalGateCar.apk
 
+      - name: Build empty-gates TEST variant (empty-state render proof only)
+        env:
+          ECJ_JAR: ${{ github.workspace }}/tools/ecj.jar
+          TEST_BUILD: '1'
+          EMPTY_GATES: '1'
+        run: |
+          ./build.sh
+          mv PalGateCar.apk PalGateCar-TEST-empty.apk
+
+      - name: Upload empty-gates TEST APK (TEST BUILD, empty-state proof only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: PalGateCar-TEST-empty-no-actuation
+          path: PalGateCar-TEST-empty.apk
+          if-no-files-found: error
+
       - name: Build WidgetHostTest.apk (widget hosted-render harness)
         env:
           ECJ_JAR: ${{ github.workspace }}/tools/ecj.jar
@@ -224,6 +240,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: aare-build-artifacts
+
+      - name: Download empty-gates TEST apk (render proof phase A)
+        uses: actions/download-artifact@v4
+        with:
+          name: PalGateCar-TEST-empty-no-actuation
 
       - name: Install headunit runtime deps (ffmpeg 8 static arm64, pinned + hash-verified)
         run: |
