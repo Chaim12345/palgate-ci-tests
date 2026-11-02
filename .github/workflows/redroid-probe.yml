@@ -1,32 +1,105 @@
 name: redroid-capability-probe
-# One bounded, read-only host capability probe for the user's redroid/native-ARM
-# question: does GitHub's ubuntu-24.04-arm runner kernel offer binder/binderfs
-# (required by redroid containers)? No checkout, no secrets, no untrusted code,
-# no persistent changes (throwaway runner). Container AOSP is never stock
-# Android Auto / GMS proof regardless of outcome.
+# Bounded redroid probe for the user's native-ARM-Android-in-CI question.
+# Authorization scope (parent, 2026-11-02 10:51): ONE bounded boot probe on
+# ubuntu-24.04-arm; pinned reviewed arm64 image by digest; no secrets, no write
+# credentials, no private fixtures, no untrusted repo code under privilege;
+# synthetic TEST-marker APK only (actuation disabled); limited time/resources;
+# proof required: binderfs mount, privileged docker policy, boot, adb, install,
+# screencap pixels. An unmodified redroid container is AOSP without GMS /
+# gearhead: it does not prove stock Android Auto projection; what adding those
+# components would require is unexplored.
 on: [push]
+
+env:
+  # Pinned official redroid image (remote-android/redroid-doc -> Docker Hub
+  # redroid/redroid), Android 16 64-only, dated immutable tag, arm64 digest
+  # fetched from the Docker Hub API on 2026-11-02.
+  REDROID_IMAGE: redroid/redroid:16.0.0_64only-250627@sha256:e194edc99aa364358d1f8c214acb18b6d006c74fa0561f39259a20173ec30b66
+
 jobs:
-  probe:
+  boot:
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
     steps:
-      - name: Probe ARM host kernel capabilities for redroid
+      - name: Kernel binder setup (ephemeral runner; the mount under test)
         run: |
-          echo "== arch/kernel =="
-          uname -m; uname -r
-          echo "== binder/ashmem in kernel config =="
-          (zcat /proc/config.gz 2>/dev/null || cat /boot/config-$(uname -r) 2>/dev/null) | grep -E 'CONFIG_ANDROID_BINDERFS|CONFIG_ANDROID_BINDER_IPC|CONFIG_ASHMEM|CONFIG_MEMFD' || echo "no readable kernel config"
-          echo "== prebuilt android driver modules =="
-          ls /lib/modules/$(uname -r)/kernel/drivers/android/ 2>/dev/null || echo "no drivers/android module dir"
-          echo "== binderfs filesystem support =="
-          grep -w binder /proc/filesystems || echo "binderfs NOT in /proc/filesystems"
-          echo "== modprobe attempt (ephemeral runner, reviewed safe) =="
-          if sudo modprobe binder_linux devices=binder,hwbinder,vndbinder 2>/tmp/modprobe.err; then echo MODPROBE_OK; else echo "MODPROBE_FAIL: $(cat /tmp/modprobe.err)"; fi
-          lsmod | grep -E 'binder|ashmem' || echo "no binder/ashmem modules loaded"
-          echo "== binder device nodes =="
-          ls -la /dev/binderfs /dev/binder 2>/dev/null || echo "no binder device nodes"
-          echo "== docker availability (redroid runs privileged docker) =="
-          docker version --format 'server {{.Server.Version}}' 2>/dev/null || echo "no docker daemon"
-          echo "== resources =="
-          nproc; free -h | head -2
-          echo "== kvm (for comparison; redroid does NOT need it) =="
-          ls /dev/kvm 2>/dev/null || echo "no /dev/kvm"
+          set -x
+          sudo modprobe binder_linux devices=binder,hwbinder,vndbinder
+          sudo mkdir -p /dev/binderfs
+          sudo mount -t binder binder /dev/binderfs
+          ls -la /dev/binderfs/
+          grep -w binder /proc/filesystems
+
+      - name: Pull pinned image and validate config BEFORE privileged execution
+        run: |
+          set -x
+          docker pull "$REDROID_IMAGE"
+          docker image inspect "$REDROID_IMAGE" --format 'digests={{.RepoDigests}}'
+          EP=$(docker image inspect "$REDROID_IMAGE" --format '{{json .Config.Entrypoint}}{{json .Config.Cmd}}')
+          echo "entrypoint/cmd: $EP"
+          echo "$EP" | grep -q '/init' || { echo "UNEXPECTED image entrypoint - aborting"; exit 1; }
+          docker image inspect "$REDROID_IMAGE" --format 'user={{.Config.User}} env={{json .Config.Env}} exposed={{json .Config.ExposedPorts}}'
+
+      - name: Install native aarch64 adb client
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq adb || sudo apt-get install -y -qq android-tools-adb
+          adb version | head -1
+
+      - name: Fetch synthetic TEST APK from latest green palgate-ci run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -x
+          RID=$(gh run list -R Chaim12345/palgate-ci-tests -b ci/dhu-widget-host -w ci.yml -s success -L 1 --json databaseId -q '.[0].databaseId')
+          echo "source run: $RID"
+          gh run download "$RID" -R Chaim12345/palgate-ci-tests -n PalGateCar-TEST-no-actuation -D apk/
+          ls -la apk/
+          # No-actuation guarantee: the test marker must be inside the APK.
+          unzip -l apk/PalGateCar.apk | grep -q 'assets/test_build.marker' && echo "TEST MARKER PRESENT - actuation disabled build"
+
+      - name: "Boot redroid container (bounded 2 CPU / 4G / 15min job cap)"
+        run: |
+          set -x
+          docker run -d --name redroid --privileged \
+            -v /dev/binderfs:/dev/binderfs \
+            -p 5555:5555 \
+            --memory 4g --cpus 2 \
+            "$REDROID_IMAGE" \
+            androidboot.redroid_gpu_mode=guest \
+            androidboot.redroid_width=720 androidboot.redroid_height=1280 androidboot.redroid_dpi=320
+          sleep 10
+          docker ps --filter name=redroid --format '{{.Status}}'
+          adb connect localhost:5555
+          for i in $(seq 1 48); do
+            BC=$(adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            echo "boot poll $i: boot_completed=$BC"
+            [ "$BC" = "1" ] && break
+            sleep 5
+          done
+          [ "$BC" = "1" ] || { echo "BOOT TIMEOUT"; docker logs redroid 2>&1 | tail -50; exit 1; }
+          adb -s localhost:5555 shell getprop ro.build.version.release
+          adb -s localhost:5555 shell getprop ro.product.cpu.abi
+
+      - name: Install TEST APK and capture actual pixels
+        run: |
+          set -x
+          adb -s localhost:5555 install -r apk/PalGateCar.apk
+          adb -s localhost:5555 shell pm list packages | grep -i palgate || echo "palgate package NOT listed"
+          mkdir -p artifacts
+          adb -s localhost:5555 exec-out screencap -p > artifacts/redroid_boot.png
+          file artifacts/redroid_boot.png
+          ls -la artifacts/
+
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redroid-boot-artifacts
+          path: artifacts/
+          if-no-files-found: warn
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f redroid || true
+          sudo umount /dev/binderfs || true
