@@ -39,13 +39,23 @@ adb shell cat /proc/net/unix | grep -q '@aare_hu' && echo "AARE head-unit server
 
 echo "-- aare lane: headless head unit --"
 adb logcat -c || true
+
+# DIAGNOSTIC (temporary): wrap ffmpeg so its stdin (the phone's actual H.264
+# bytes) is captured per invocation. The decode failure gets full evidence
+# instead of guesswork. Removed once the render pipeline is green.
+if [ -x /usr/local/bin/ffmpeg ]; then
+  sudo mv /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg.real
+  printf '#!/bin/bash\ntee "$PWD/ffstdin.$$.h264" | /usr/local/bin/ffmpeg.real "$@"\n' | sudo tee /usr/local/bin/ffmpeg >/dev/null
+  sudo chmod +x /usr/local/bin/ffmpeg
+  ( cd "$ART" && touch .teedir ) # ensure dir exists
+fi
 HU="$AARE_DIR/headunit/build/install/aare-headunit/bin/aare-headunit"
-timeout 120 "$HU" --serial "$ANDROID_SERIAL" --headless "$ART/aare" > "$ART/aare_hu.log" 2>&1 &
+timeout 240 "$HU" --serial "$ANDROID_SERIAL" --headless "$ART/aare" > "$ART/aare_hu.log" 2>&1 &
 HUPID=$!
 
 # The first connection needs a Trust tap on the phone (AARE cert model,
 # docs/certificates.md); the HU retries, so watch for the prompt and accept.
-for i in $(seq 1 12); do
+for i in $(seq 1 20); do
   sleep 5
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
   adb shell cat /sdcard/ui.xml 2>/dev/null | grep -qi "trust" || continue
@@ -72,6 +82,8 @@ else:
 PY
 done
 wait $HUPID || true
+mv ffstdin.*.h264 "$ART/" 2>/dev/null || true
+ls -la "$ART"/ffstdin.*.h264 2>/dev/null || echo "no ffstdin captures"
 ls -la "$ART/aare" 2>/dev/null | head
 
 adb logcat -d -s PalGate:I > "$ART/aare_palgate.log" 2>/dev/null || true
