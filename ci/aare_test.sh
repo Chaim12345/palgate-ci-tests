@@ -68,7 +68,32 @@ HUPID=$!
       adb shell screencap -p /sdcard/aare_ph0.png > "$ART/screencap_d0.log" 2>&1
       adb pull /sdcard/aare_ph0.png "$ART/aare_phone_screen.png" >/dev/null 2>&1 || true
       adb shell dumpsys SurfaceFlinger > "$ART/surfaceflinger_mid.txt" 2>/dev/null || true
-      sleep 15
+      # User-requested: tap the app's "Preview car screen" button and capture
+      # what it actually shows on the phone display.
+      adb shell uiautomator dump /sdcard/ui_prev.xml >/dev/null 2>&1
+      python3 - <<'PYTAP'
+import subprocess, re
+xml = subprocess.run(["adb","shell","cat","/sdcard/ui_prev.xml"], capture_output=True, text=True).stdout
+best = None
+for m in re.finditer(r'text="([^"]*[Pp]review[^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml):
+    best = m
+for m in re.finditer(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*text="([^"]*[Pp]review[^"]*)"', xml):
+    if best is None: best = m
+if best:
+    g = best.groups()
+    nums = g[1:] if (len(g) == 5 and not g[0].isdigit()) else g[:4]
+    x1,y1,x2,y2 = map(int, nums)
+    subprocess.run(["adb","shell","input","tap",str((x1+x2)//2),str((y1+y2)//2)])
+    print("tapped Preview at", (x1+x2)//2, (y1+y2)//2)
+else:
+    print("no Preview button found in UI dump")
+PYTAP
+      sleep 6
+      adb shell screencap -p /sdcard/aare_prev.png > "$ART/screencap_prev.log" 2>&1
+      adb pull /sdcard/aare_prev.png "$ART/aare_preview.png" >/dev/null 2>&1 || true
+      adb shell uiautomator dump /sdcard/ui_after.xml >/dev/null 2>&1
+      adb shell cat /sdcard/ui_after.xml > "$ART/ui_after_preview.xml" 2>/dev/null || true
+      sleep 9
       adb shell screencap -d 2 -p /sdcard/aare_car2b.png >> "$ART/screencap_d2.log" 2>&1
       adb pull /sdcard/aare_car2b.png "$ART/aare_car_display_b.png" >/dev/null 2>&1 || true
       adb shell dumpsys SurfaceFlinger > "$ART/surfaceflinger_late.txt" 2>/dev/null || true
