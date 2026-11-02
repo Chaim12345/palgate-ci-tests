@@ -12,6 +12,7 @@ on:
       - 'build.sh'
       - 'ci/aa_test.sh'
       - 'ci/aare_test.sh'
+      - 'ci/synthetic_whitelist.txt'
       - 'fetch_deps.py'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
