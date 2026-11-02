@@ -73,22 +73,38 @@ public class GateGridScreen extends Screen implements State.Listener {
         int limit = gridContentLimit();
 
         ItemList.Builder list = new ItemList.Builder();
-        String title = "PalGate - " + s.phaseText();
+        // Monitor-off is first-class car status, not a log line: a short
+        // title that hosts cannot ellipsize plus a status card whose
+        // recovery hint fits the tile (titles/text get cut ~24-30 chars).
+        boolean monitorOff = s.monitorStartFailed;
+        boolean failedOff = s.phase == State.PHASE_FAILED && s.phaseDetail.startsWith("monitor off");
+        String title = failedOff ? "PalGate - monitor off" : "PalGate - " + s.phaseText();
+        int budget = limit;
+        if (monitorOff) {
+            list.addItem(new GridItem.Builder()
+                    .setTitle("Monitor off")
+                    .setText(s.monitorHint)
+                    .setImage(icon(), GridItem.IMAGE_TYPE_ICON)
+                    .build());
+            budget--;
+        }
         if (gates.isEmpty()) {
             list.addItem(new GridItem.Builder()
                     .setTitle("No gates configured")
-                    .setText("Add gates in the PalGate Car phone app")
+                    .setText("Add gates in the app")
                     .setImage(icon(), GridItem.IMAGE_TYPE_ICON)
                     .build());
         } else {
             List<Gate> show = applySessionOrder(gates, s);
-            if (show.size() > limit) {
-                // Hosts reject the whole template above the content limit.
-                // Disclose the cap inside a normal template title (no extra
-                // items, no invalid template); the full list stays in the
-                // phone app.
-                title += " (first " + limit + " of " + show.size() + ")";
-                show = new ArrayList<>(show.subList(0, limit));
+            int more = 0;
+            if (show.size() > budget) {
+                // Hosts reject the whole template above the content limit,
+                // and a title disclosure ellipsizes away. Disclose the cap
+                // as a visible trailing card instead; the full list stays
+                // in the phone app.
+                int keep = Math.max(budget - 1, 0);
+                more = show.size() - keep;
+                show = new ArrayList<>(show.subList(0, keep));
             }
             for (final Gate g : show) {
                 list.addItem(new GridItem.Builder()
@@ -98,6 +114,13 @@ public class GateGridScreen extends Screen implements State.Listener {
                         .setOnClickListener(new androidx.car.app.model.OnClickListener() {
                             @Override public void onClick() { openGate(g); }
                         })
+                        .build());
+            }
+            if (more > 0) {
+                list.addItem(new GridItem.Builder()
+                        .setTitle("+" + more + " more gates")
+                        .setText("See all in phone app")
+                        .setImage(icon(), GridItem.IMAGE_TYPE_ICON)
                         .build());
             }
         }

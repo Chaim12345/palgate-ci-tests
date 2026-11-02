@@ -155,7 +155,7 @@ public class GateMonitorService extends Service {
                     State.get().post(new Runnable() {
                         @Override public void run() {
                             State.get().phase = State.PHASE_FAILED;
-                            State.get().phaseDetail = "monitoring off - start it from the phone app, then tap again";
+                            State.get().phaseDetail = "monitor off";
                         }
                     });
                 }
@@ -223,10 +223,28 @@ public class GateMonitorService extends Service {
             } else {
                 startForeground(NOTIF_ID, buildNotification());
             }
+            State.get().post(new Runnable() {
+                @Override public void run() { State.get().monitorStartFailed = false; }
+            });
             return true;
         } catch (SecurityException se) {
             Log.i("PalGate", "monitor not started from car UI (SecurityException): "
                     + "background location start ineligible - start it from the phone app");
+            // Cause-aware, car-readable recovery: a missing PERMISSION is not
+            // fixed by opening the phone app - it needs Settings. Keep each
+            // hint <= ~24 chars so car hosts show it whole.
+            boolean noPerm = Build.VERSION.SDK_INT >= 23
+                    && checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                            != android.content.pm.PackageManager.PERMISSION_GRANTED
+                    && checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                            != android.content.pm.PackageManager.PERMISSION_GRANTED;
+            final String hint = noPerm ? "Grant location access" : "Open phone app to start";
+            State.get().post(new Runnable() {
+                @Override public void run() {
+                    State.get().monitorStartFailed = true;
+                    State.get().monitorHint = hint;
+                }
+            });
             State.get().log("monitor not started from car UI (" + se.getClass().getSimpleName()
                     + "): Android blocks background location monitoring - "
                     + "start it from the PalGate Car phone app");

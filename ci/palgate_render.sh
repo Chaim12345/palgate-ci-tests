@@ -150,8 +150,9 @@ else
   ACT=0; [ -s "$ART/render_tap_actuation.log" ] && ACT=1
   CRASH=0; [ -s "$ART/render_tap_crash.log" ] && CRASH=1
   dump_gate_screen "refused"
-  UIOK=0; grep -q 'FAILED' "$ART/render_ui_gate_refused.xml" 2>/dev/null \
-     && grep -qi 'monitoring off' "$ART/render_ui_gate_refused.xml" 2>/dev/null && UIOK=1
+  UIOK=0; grep -q 'PalGate - monitor off' "$ART/render_ui_gate_refused.xml" 2>/dev/null \
+     && grep -q 'Monitor off' "$ART/render_ui_gate_refused.xml" 2>/dev/null \
+     && grep -q 'Open phone app to start' "$ART/render_ui_gate_refused.xml" 2>/dev/null && UIOK=1
   if [ "$REFUSED" = "1" ] && [ "$DISPATCH" = "0" ] && [ "$ACT" = "0" ] && [ "$CRASH" = "0" ] && [ "$UIOK" = "1" ]; then
     echo "palgate_render_open_blocked,gate,pass,\"BRANCH=refusal: car OPEN tap with monitor off in a background-ineligible state gave an explicit car-UI refusal (FAILED + monitoring-off guidance), NO dispatch, zero actuation, no crash, no FGS-timeout ANR (>10s window). The promotion-success dispatch path (choked SYNTHETIC-DISPATCH) is proven separately in aa_test (app foreground)\"" >> "$MATRIX"
     echo "PHASE B1 tap OK (refusal branch): nothing dispatched or actuated"
@@ -211,15 +212,32 @@ PYSEED
   else
     dump_gate_screen "overflow"
     UI="$ART/render_ui_gate_overflow.xml"
-    ITEMS=$(grep -o 'text="Test Gate [A-Z] (SYNTHETIC)' "$UI" 2>/dev/null | sort -u | wc -l)
-    HIDDEN=1; grep -q 'Test Gate G (SYNTHETIC)' "$UI" && HIDDEN=0
-    DISCLOSED=0; grep -qE 'of 7\)' "$UI" && DISCLOSED=1
-    echo "visible items: $ITEMS (expect <=6), 7th hidden: $HIDDEN, cap disclosed: $DISCLOSED"
-    if [ "$ITEMS" -ge 1 ] && [ "$ITEMS" -le 6 ] && [ "$HIDDEN" = "1" ] && [ "$DISCLOSED" = "1" ]; then
-      echo "palgate_render_overflow,gate,pass,\"7 gates -> $ITEMS shown (host limit respected, template NOT rejected), 7th hidden, cap disclosed in title (AARE third-party host): render_ui_gate_overflow.xml + png\"" >> "$MATRIX"
-      echo "PHASE B2 OK"
+    # AARE renders the grid as a LazyVerticalGrid (source: host/templates/
+    # GridUi.kt) - the model holds up to the host limit (6 driving-restricted,
+    # CarRuntime.kt) but the UI dump only contains the COMPOSED viewport (2
+    # cells at 640x360). Prove reachability by scrolling and unioning dumps.
+    SEEN=$(grep -oE 'Test Gate [A-Z] \(SYNTHETIC\)|\+[0-9]+ more gates|Monitor off' "$UI" 2>/dev/null)
+    for i in 1 2 3; do
+      adb shell input swipe 600 520 600 260 300 >/dev/null 2>&1; sleep 2
+      adb shell uiautomator dump /sdcard/ui_gate.xml >/dev/null 2>&1
+      adb shell cat /sdcard/ui_gate.xml > "$ART/render_ui_gate_overflow_scroll$i.xml" 2>/dev/null || true
+      SEEN="$SEEN
+$(grep -oE 'Test Gate [A-Z] \(SYNTHETIC\)|\+[0-9]+ more gates|Monitor off' "$ART/render_ui_gate_overflow_scroll$i.xml" 2>/dev/null)"
+      echo "$SEEN" | grep -q 'more gates' && break
+    done
+    adb shell screencap -p /sdcard/palgate_render_overflow_scrolled.png >/dev/null 2>&1
+    adb pull /sdcard/palgate_render_overflow_scrolled.png "$ART/palgate_render_overflow_scrolled.png" >/dev/null 2>&1 || true
+    SEENU=$(echo "$SEEN" | sort -u)
+    echo "items observed across scrolls:"; echo "$SEENU" | sed 's/^/  /'
+    OKA=1; for g in A B C D; do echo "$SEENU" | grep -q "Test Gate $g (SYNTHETIC)" || OKA=0; done
+    MORE=0; echo "$SEENU" | grep -q '+3 more gates' && MORE=1
+    MON=0; echo "$SEENU" | grep -q 'Monitor off' && MON=1
+    HIDDEN=1; echo "$SEENU" | grep -qE 'Test Gate [EFG] \(SYNTHETIC\)' && HIDDEN=0
+    if [ "$OKA" = "1" ] && [ "$MORE" = "1" ] && [ "$MON" = "1" ] && [ "$HIDDEN" = "1" ]; then
+      echo "palgate_render_overflow,gate,pass,\"7 gates + monitor-off card -> host limit 6 respected, template NOT rejected: model = [Monitor off, A, B, C, D, '+3 more gates']. LazyVerticalGrid viewport shows 2 cells; scrolling revealed every model item (reachability proven, not XML-only). E/F/G never rendered - cap disclosed by the visible '+3 more gates' card, not an ellipsized title (AARE third-party host): render_ui_gate_overflow*.xml + pngs\"" >> "$MATRIX"
+      echo "PHASE B2 OK (scroll reachability proven)"
     else
-      echo "palgate_render_overflow,gate,fail,\"items=$ITEMS hidden=$HIDDEN disclosed=$DISCLOSED: $UI\"" >> "$MATRIX"
+      echo "palgate_render_overflow,gate,fail,\"gatesAD=$OKA more=$MORE mon=$MON hidden=$HIDDEN: $UI + scroll dumps\"" >> "$MATRIX"
       echo "::error::PHASE B2 FAILED"
       FAIL=1
     fi

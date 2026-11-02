@@ -55,6 +55,12 @@ public final class State {
     public double nearestRawM = Double.MAX_VALUE;    // raw single-fix distance
     public boolean inRange;
     public int phase = PHASE_IDLE;
+    /** True after a monitor foreground-start was refused (Android 14+
+     *  background/permission rules); the car screen shows a status card. */
+    public boolean monitorStartFailed;
+    /** Short, car-readable recovery for monitorStartFailed (<= ~24 chars so
+     *  hosts do not ellipsize it away). */
+    public String monitorHint = "Open phone app to start";
     public String phaseDetail = "";
     public long lastOpenAtMs;
     public String lastOpenGateId = "";
