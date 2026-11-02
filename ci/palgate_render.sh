@@ -128,8 +128,13 @@ if ! open_preview; then
 else
   dump_gate_screen "populated"
   UI="$ART/render_ui_gate_populated.xml"
-  ITEMS=$(grep -o 'text="Test Gate [A-Z] (SYNTHETIC)' "$UI" 2>/dev/null | sort -u | wc -l)
-  echo "visible synthetic gate items: $ITEMS"
+  # The Monitor-off status card takes the first viewport cell, so the
+  # composed viewport shows only ONE gate; union one scroll like B2.
+  adb shell input swipe 600 520 600 260 300 >/dev/null 2>&1; sleep 2
+  adb shell uiautomator dump /sdcard/ui_gate.xml >/dev/null 2>&1
+  adb shell cat /sdcard/ui_gate.xml > "$ART/render_ui_gate_populated_scroll1.xml" 2>/dev/null || true
+  ITEMS=$(cat "$UI" "$ART/render_ui_gate_populated_scroll1.xml" 2>/dev/null | grep -o 'text="Test Gate [A-Z] (SYNTHETIC)' | sort -u | wc -l)
+  echo "visible synthetic gate items (viewport + 1 scroll): $ITEMS"
   if grep -q 'PalGate - ' "$UI" && [ "$ITEMS" -eq 2 ] && [ -s "$ART/palgate_render_populated.png" ]; then
     echo "palgate_render_populated,gate,pass,\"2 synthetic gates rendered with titles (AARE third-party host): render_ui_gate_populated.xml + png\"" >> "$MATRIX"
     echo "PHASE B1 render OK"
@@ -154,7 +159,7 @@ else
      && grep -q 'Monitor off' "$ART/render_ui_gate_refused.xml" 2>/dev/null \
      && grep -q 'Open phone app to start' "$ART/render_ui_gate_refused.xml" 2>/dev/null && UIOK=1
   if [ "$REFUSED" = "1" ] && [ "$DISPATCH" = "0" ] && [ "$ACT" = "0" ] && [ "$CRASH" = "0" ] && [ "$UIOK" = "1" ]; then
-    echo "palgate_render_open_blocked,gate,pass,\"BRANCH=refusal: car OPEN tap with monitor off in a background-ineligible state gave an explicit car-UI refusal (FAILED + monitoring-off guidance), NO dispatch, zero actuation, no crash, no FGS-timeout ANR (>10s window). The promotion-success dispatch path (choked SYNTHETIC-DISPATCH) is proven separately in aa_test (app foreground)\"" >> "$MATRIX"
+    echo "palgate_render_open_blocked,gate,pass,\"BRANCH=refusal: car OPEN tap with monitor off in a background-ineligible state gave an explicit CAR-READABLE refusal (short title 'PalGate - monitor off' + 'Monitor off' card + 'Open phone app to start' hint, all within the tile budget), NO dispatch, zero actuation, no crash, no FGS-timeout ANR (>10s window). The promotion-success dispatch path (choked SYNTHETIC-DISPATCH) is proven separately in aa_test (app foreground)\"" >> "$MATRIX"
     echo "PHASE B1 tap OK (refusal branch): nothing dispatched or actuated"
   elif [ "$DISPATCH" = "1" ] && [ "$ACT" = "0" ] && [ "$CRASH" = "0" ]; then
     echo "palgate_render_open_blocked,gate,pass,\"BRANCH=dispatch: AARE proved promotion-eligible here (not an app defect): car OPEN tap reached the TEST choke (SYNTHETIC-DISPATCH), zero actuation, no crash\"" >> "$MATRIX"
