@@ -12,9 +12,15 @@ on: [push]
 
 env:
   # Pinned official redroid image (remote-android/redroid-doc -> Docker Hub
-  # redroid/redroid), Android 16 64-only, dated immutable tag, arm64 digest
-  # fetched from the Docker Hub API on 2026-11-02.
-  REDROID_IMAGE: redroid/redroid:16.0.0_64only-250627@sha256:e194edc99aa364358d1f8c214acb18b6d006c74fa0561f39259a20173ec30b66
+  # redroid/redroid), dated immutable tag, arm64 digest fetched from the
+  # Docker Hub API on 2026-11-02. VERDICT SO FAR: Android 16
+  # (16.0.0_64only-250627@sha256:e194edc9...) boots through init/HALs/adbd but
+  # surfaceflinger crash-loops ("output buffer not gpu writeable", Skia
+  # shader-cache priming, redroid-doc#934; use_memfd=1 did NOT help on the
+  # Azure 7.0.0 kernel without CONFIG_ASHMEM). This is ONE bounded
+  # compatibility check on Android 15; a pass here is an Android-15-container
+  # result only, never Android 16 / stock AA / GMS proof.
+  REDROID_IMAGE: redroid/redroid:15.0.0_64only-250627@sha256:dc2024a999dd0acb1112a23cddc9537ec8cb60a0dbe5a87ce9fbd75a2f5e94d2
 
 jobs:
   boot:
