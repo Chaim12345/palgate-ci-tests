@@ -247,9 +247,16 @@ fi
 echo "-- optional: Open Headunit self-mode (experimental) --"
 adb shell monkey -p com.andrerinas.headunitrevived -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 8; shot 30_openheadunit
-tap_text "OK" >/dev/null 2>&1 || true
-tap_text "Allow" >/dev/null 2>&1 || true
-sleep 2
+# first-run wizard ("Welcome to Open Headunit"): skip setup to reach the main
+# screen, then look for Self mode. Bounded loop; 30b shows where we landed.
+for i in 1 2 3; do
+  tap_text "DO IT LATER" >/dev/null 2>&1 && sleep 3
+  tap_text "Next" >/dev/null 2>&1 && sleep 3
+  tap_text "OK" >/dev/null 2>&1 || true
+  tap_text "Allow" >/dev/null 2>&1 || true
+  sleep 2
+done
+shot 30b_oh_main
 tap_text "Self" >/dev/null 2>&1 || tap_text "127.0.0.1" >/dev/null 2>&1 || true
 sleep 10; shot 31_oh_projection
 if ui_has "PalGate"; then opt "Open Headunit self-mode: PalGate visible (experimental)"; row open_headunit optional executed "ui"
@@ -272,9 +279,18 @@ if tap_text "Widgets"; then
     COORDS=$(python3 - <<'PY'
 import re
 xml=open('artifacts/ui_last.xml').read()
-# prefer an ImageView/ImageButton whose bounds sit below a 'PalGate' label
-labels=[(int(m.group(2)),int(m.group(3)),int(m.group(4)),int(m.group(5))) for m in re.finditer(r'text="PalGate[^"]*"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',xml)]
-imgs=[(int(m.group(1)),int(m.group(2)),int(m.group(3)),int(m.group(4))) for m in re.finditer(r'class="android.widget.ImageView"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',xml)]
+# prefer an ImageView/ImageButton whose bounds sit below a 'PalGate' label;
+# parse each node tag separately so attribute order does not matter
+def attrs(tag):
+    t=re.search(r'text="([^"]*)"',tag); c=re.search(r'class="([^"]*)"',tag)
+    b=re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"',tag)
+    return (t.group(1) if t else ''), (c.group(1) if c else ''), (tuple(map(int,b.groups())) if b else None)
+labels=[]; imgs=[]
+for m in re.finditer(r'<node[^>]*>',xml):
+    txt,cls,b=attrs(m.group(0))
+    if not b: continue
+    if txt.startswith('PalGate'): labels.append(b)
+    if 'ImageView' in cls or 'ImageButton' in cls: imgs.append(b)
 for lx1,ly1,lx2,ly2 in labels:
     best=None
     for x1,y1,x2,y2 in imgs:
