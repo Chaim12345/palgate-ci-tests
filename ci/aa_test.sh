@@ -162,6 +162,7 @@ else
   gate_block "gearhead not preinstalled on this image"; row gearhead gate gate-blocked "package missing"
 fi
 
+if [ "${RUN_DHU:-1}" = "1" ]; then
 echo "-- gate: AA developer mode via Settings --"
 adb shell input keyevent KEYCODE_HOME; sleep 1
 adb shell am start -a android.settings.SETTINGS >/dev/null 2>&1; sleep 4
@@ -206,6 +207,12 @@ if adb shell netstat -lnt 2>/dev/null | grep -q 5277 || adb shell ss -lnt 2>/dev
   HUS=1
 else
   gate_block "port 5277 not listening; AA loopback not established"; row hus5277 gate gate-blocked "netstat empty"
+  HUS=0
+fi
+else
+  opt "AA developer mode / head-unit-server checks skipped with the DHU stage (RUN_DHU=0)"
+  row aa_devmode gate skipped "RUN_DHU=0"
+  row hus5277 gate skipped "RUN_DHU=0"
   HUS=0
 fi
 
@@ -268,7 +275,9 @@ adb shell monkey -p com.andrerinas.headunitrevived -c android.intent.category.LA
 sleep 8; shot 30_openheadunit
 # first-run wizard ("Welcome to Open Headunit"): skip setup to reach the main
 # screen, then look for Self mode. Bounded loop; 30b shows where we landed.
-for i in 1 2 3; do
+for i in 1 2 3 4; do
+  # "Safety first" page: Next is disabled until the terms checkbox is ticked
+  tap_text "I have read and accept the terms" >/dev/null 2>&1 && sleep 1
   tap_text "DO IT LATER" >/dev/null 2>&1 && sleep 3
   tap_text "Next" >/dev/null 2>&1 && sleep 3
   tap_text "OK" >/dev/null 2>&1 || true
@@ -286,7 +295,9 @@ adb shell input keyevent KEYCODE_HOME; sleep 3
 adb shell input swipe $CX $((SH/3)) $CX $((SH/3)) 1500; sleep 2
 shot 32_home_longpress
 if tap_text "Widgets"; then
-  sleep 3; shot 33_widget_picker
+  sleep 3
+  tap_text "Got it" >/dev/null 2>&1 && sleep 2   # Android 14 picker education overlay
+  shot 33_widget_picker
   found=0
   for i in 1 2 3 4 5 6 7 8; do
     if ui_has "PalGate"; then found=1; break; fi
