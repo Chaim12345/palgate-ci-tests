@@ -50,9 +50,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -x
-          RID=$(gh run list -R Chaim12345/palgate-ci-tests -b ci/dhu-widget-host -w ci.yml -s success -L 1 --json databaseId -q '.[0].databaseId')
-          echo "source run: $RID"
-          gh run download "$RID" -R Chaim12345/palgate-ci-tests -n PalGateCar-TEST-no-actuation -D apk/
+          # Newest repo artifact with this name regardless of run conclusion
+          # (a run with a failed optional lane still carries a good APK).
+          AID=$(gh api "repos/Chaim12345/palgate-ci-tests/actions/artifacts?per_page=1&name=PalGateCar-TEST-no-actuation" -q '.artifacts[0].id')
+          echo "artifact id: $AID"
+          [ -n "$AID" ] && [ "$AID" != "null" ] || { echo "no TEST APK artifact found"; exit 1; }
+          mkdir -p apk
+          gh api "repos/Chaim12345/palgate-ci-tests/actions/artifacts/$AID/zip" > apk/apk.zip
+          cd apk && unzip -o apk.zip && rm apk.zip && cd ..
           ls -la apk/
           # No-actuation guarantee: the test marker must be inside the APK.
           unzip -l apk/PalGateCar.apk | grep -q 'assets/test_build.marker' && echo "TEST MARKER PRESENT - actuation disabled build"
