@@ -222,14 +222,24 @@ PYSEED
     # CarRuntime.kt) but the UI dump only contains the COMPOSED viewport (2
     # cells at 640x360). Prove reachability by scrolling and unioning dumps.
     SEEN=$(grep -oE 'Test Gate [A-Z] \(SYNTHETIC\)|\+[0-9]+ more gates|Monitor off' "$UI" 2>/dev/null)
+    SCROLLED=0
     for i in 1 2 3; do
       adb shell input swipe 600 520 600 260 300 >/dev/null 2>&1; sleep 2
       adb shell uiautomator dump /sdcard/ui_gate.xml >/dev/null 2>&1
       adb shell cat /sdcard/ui_gate.xml > "$ART/render_ui_gate_overflow_scroll$i.xml" 2>/dev/null || true
       SEEN="$SEEN
 $(grep -oE 'Test Gate [A-Z] \(SYNTHETIC\)|\+[0-9]+ more gates|Monitor off' "$ART/render_ui_gate_overflow_scroll$i.xml" 2>/dev/null)"
-      echo "$SEEN" | grep -q 'more gates' && break
+      if echo "$SEEN" | grep -q 'more gates'; then SCROLLED=$i; break; fi
     done
+    # The lazy grid composes the last card while it is still peeking at the
+    # viewport edge, so the detection scroll leaves it cut off in pixels.
+    # Scroll once more so the "+N more gates" card is FULLY in view, then
+    # capture - the cap card's readability claim needs complete pixels.
+    if [ "$SCROLLED" != "0" ]; then
+      adb shell input swipe 600 520 600 260 300 >/dev/null 2>&1; sleep 2
+      adb shell uiautomator dump /sdcard/ui_gate.xml >/dev/null 2>&1
+      adb shell cat /sdcard/ui_gate.xml > "$ART/render_ui_gate_overflow_bottom.xml" 2>/dev/null || true
+    fi
     adb shell screencap -p /sdcard/palgate_render_overflow_scrolled.png >/dev/null 2>&1
     adb pull /sdcard/palgate_render_overflow_scrolled.png "$ART/palgate_render_overflow_scrolled.png" >/dev/null 2>&1 || true
     SEENU=$(echo "$SEEN" | sort -u)
