@@ -67,8 +67,12 @@ jobs:
           TEST_BUILD: '1'
           EMPTY_GATES: '1'
         run: |
+          cp PalGateCar.apk /tmp/PalGateCar.standard.apk
           ./build.sh
           mv PalGateCar.apk PalGateCar-TEST-empty.apk
+          # build.sh rm -rf's out/ and overwrites PalGateCar.apk; restore the
+          # standard TEST apk for downstream steps (aa_test.sh installs it).
+          cp /tmp/PalGateCar.standard.apk PalGateCar.apk
 
       - name: Upload empty-gates TEST APK (TEST BUILD, empty-state proof only)
         uses: actions/upload-artifact@v4

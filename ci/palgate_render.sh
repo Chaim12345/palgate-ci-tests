@@ -65,7 +65,16 @@ open_preview() { # -> opens AARE preview, launcher, taps PalGate Car; rc 1 on fa
   tap_text 'Preview' /sdcard/ui_main.xml || return 1
   sleep 8
   adb shell uiautomator dump /sdcard/ui_dash.xml >/dev/null 2>&1
-  tap_text 'Apps' /sdcard/ui_dash.xml || return 1
+  # Launcher route: the rail's Apps menu button is unreliable at this display
+  # geometry (side-rail content overflows; menu/mic get clipped out of the
+  # semantics tree - observed in run 41486440591's render_ui_dash.xml).
+  # Grounded alternative (CarShell.kt MediaCard): with no media app the media
+  # card's onClick is openLauncher(). "Nothing playing" sits inside that
+  # card, clear of the transport buttons. Fall back to the rail labels if a
+  # media app ever registers.
+  tap_text 'Nothing playing' /sdcard/ui_dash.xml \
+    || tap_text 'Music' /sdcard/ui_dash.xml \
+    || tap_text 'Apps' /sdcard/ui_dash.xml || return 1
   sleep 5
   adb shell uiautomator dump /sdcard/ui_launcher.xml >/dev/null 2>&1
   adb shell cat /sdcard/ui_launcher.xml > "$ART/render_ui_launcher.xml" 2>/dev/null || true
