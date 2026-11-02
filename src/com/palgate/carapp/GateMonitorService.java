@@ -145,7 +145,15 @@ public class GateMonitorService extends Service {
             // fallthrough: keep running (or start properly below if not yet)
         }
         if (!listening) {
-            startAsForeground();
+            if (!startAsForeground()) {
+                // Terminal: never register GPS/BLE listeners without the
+                // foreground service (background registration would fail or
+                // misbehave), and do not stay sticky. The car screen does not
+                // need the monitor: templates render from State + Gate.load,
+                // and OPEN dispatch already ran in manualOpen above.
+                stopSelf();
+                return START_NOT_STICKY;
+            }
             startListening();
         }
         return START_STICKY;
@@ -177,7 +185,19 @@ public class GateMonitorService extends Service {
         }
     }
 
-    private void startAsForeground() {
+    /**
+     * Foreground promotion. Returns false when the system refuses it.
+     * Android 14+ (targetSdk 34): a LOCATION-typed FGS started from an
+     * ineligible state (e.g. the car session's convenience start while the
+     * app is bound in the background) throws SecurityException; uncaught it
+     * kills the whole process and the car screen with it (CI run 41499185198
+     * logcat; the captured exception names eligibility, not a missing
+     * permission - FOREGROUND_SERVICE_LOCATION is declared and location
+     * permissions are granted). No untyped fallback: the 2-arg
+     * startForeground inherits the manifest's declared type (location), so
+     * it would throw identically - there is no per-call opt-out.
+     */
+    private boolean startAsForeground() {
         try {
             if (Build.VERSION.SDK_INT >= 29) {
                 startForeground(NOTIF_ID, buildNotification(),
@@ -185,26 +205,12 @@ public class GateMonitorService extends Service {
             } else {
                 startForeground(NOTIF_ID, buildNotification());
             }
+            return true;
         } catch (SecurityException se) {
-            // Android 14+ (targetSdk 34): a LOCATION-typed FGS started while
-            // the app is not in an eligible state (e.g. the car session's
-            // convenience start while bound in the background) is rejected -
-            // and the uncaught throw kills the whole process, taking the car
-            // screen with it (observed in CI run 41499185198 logcat).
-            // Degrade instead: foreground WITHOUT the location type keeps the
-            // process and car session alive; GPS-dependent features stay off
-            // (requestLocations guards SecurityException already) until the
-            // monitor is started from the phone app in the foreground.
-            State.get().log("monitor: location-type foreground blocked from this state ("
-                    + se.getClass().getSimpleName() + ") - running without GPS; "
-                    + "start the monitor from the phone app for full function");
-            try {
-                startForeground(NOTIF_ID, buildNotification());
-            } catch (Exception e2) {
-                State.get().log("monitor: could not go foreground at all - stopping ("
-                        + e2.getClass().getSimpleName() + ")");
-                stopSelf();
-            }
+            State.get().log("monitor not started from car UI (" + se.getClass().getSimpleName()
+                    + "): Android blocks background location monitoring - "
+                    + "start it from the PalGate Car phone app");
+            return false;
         }
     }
 
