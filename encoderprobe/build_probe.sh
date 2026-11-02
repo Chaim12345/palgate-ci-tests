@@ -20,7 +20,12 @@ java -jar "$ECJ" -source 8 -target 8 -encoding UTF-8 -nowarn \
 "$BT/d8" --release --lib "$PLAT" --min-api 23 --output "$OUT/dex" "$OUT/app.jar"
 (cd "$OUT/dex" && zip -q -j "$OUT/base.apk" classes.dex)
 "$BT/zipalign" -f 4 "$OUT/base.apk" "$OUT/aligned.apk"
-KS="$SRC/../widgethost/testkey.jks"
+KS="$SRC/testkey.jks"
+if [ ! -f "$KS" ]; then
+  keytool -genkeypair -keystore "$KS" -alias palgate -keyalg RSA -keysize 2048 \
+    -validity 10000 -storepass palgatetest -keypass palgatetest \
+    -dname "CN=PalGate Car" >/dev/null 2>&1
+fi
 "$BT/apksigner" sign --ks "$KS" --ks-pass pass:palgatetest --key-pass pass:palgatetest \
   --out "$SRC/EncoderProbe.apk" "$OUT/aligned.apk"
 echo "== done: $SRC/EncoderProbe.apk =="
