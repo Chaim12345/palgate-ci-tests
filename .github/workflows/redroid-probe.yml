@@ -25,6 +25,7 @@ jobs:
         run: |
           set -x
           sudo modprobe binder_linux devices=binder,hwbinder,vndbinder
+          sudo modprobe loop || true
           sudo mkdir -p /dev/binderfs
           sudo mount -t binder binder /dev/binderfs
           ls -la /dev/binderfs/
@@ -87,13 +88,28 @@ jobs:
             adb connect localhost:5555 && break
             sleep 5
           done
-          for i in $(seq 1 48); do
+          mkdir -p artifacts
+          for i in $(seq 1 90); do
+            docker ps --filter name=redroid --format '{{.Status}}' | grep -q Up || { echo "CONTAINER EXITED"; break; }
             BC=$(adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
-            echo "boot poll $i: boot_completed=$BC"
+            ANIM=$(adb -s localhost:5555 shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r')
+            echo "boot poll $i: boot_completed=$BC bootanim=$ANIM"
             [ "$BC" = "1" ] && break
             sleep 5
           done
-          [ "$BC" = "1" ] || { echo "BOOT TIMEOUT"; docker logs redroid 2>&1 | tail -50; exit 1; }
+          if [ "$BC" != "1" ]; then
+            echo "BOOT TIMEOUT - collecting diagnostics"
+            {
+              echo "== container state =="; docker inspect redroid --format '{{json .State}}' 2>&1
+              echo "== docker logs =="; docker logs redroid 2>&1 | tail -40
+              echo "== getprop sample =="; adb -s localhost:5555 shell getprop 2>&1 | head -30
+              echo "== processes =="; adb -s localhost:5555 shell ps -A 2>&1 | head -30
+              echo "== logcat tail =="; adb -s localhost:5555 logcat -d -b all 2>&1 | tail -80
+              echo "== dmesg tail =="; adb -s localhost:5555 shell dmesg 2>&1 | tail -40
+            } > artifacts/boot_diag.txt 2>&1 || true
+            cat artifacts/boot_diag.txt | head -100
+            exit 1
+          fi
           adb -s localhost:5555 shell getprop ro.build.version.release
           adb -s localhost:5555 shell getprop ro.product.cpu.abi
 

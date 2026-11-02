@@ -65,6 +65,9 @@ jobs:
           curl -sSL -o open-headunit.apk https://github.com/andreknieriem/open-headunit/releases/download/v.3.5.0/com.andrerinas.headunitrevived_3.5.0.apk
           echo "609ca23b4eb0deaad2a58f6463b26cbf58bdc602ac0775eb5e7adb293a75a14d  open-headunit.apk" | sha256sum -c -
 
+      - name: Install headunit runtime deps (ffmpeg decodes the car screen)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
