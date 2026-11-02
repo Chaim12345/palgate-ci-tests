@@ -92,6 +92,30 @@ adb shell input swipe $CX $QY $CX $LY 300 >/dev/null 2>&1; sleep 1
 adb shell input swipe $CX $QY $CX $LY 300 >/dev/null 2>&1; sleep 1
 shot 01a_palgate_top
 
+echo "-- gate: targeted per-gate open dispatch (car-grid intent path) --"
+# The car grid and per-gate phone taps send ACTION_OPEN_NOW with a gateId extra.
+# Drive that exact path now, WHILE THE APP IS FOREGROUND (phone UI just
+# launched) so Android 12+/14 service-start restrictions cannot confound the
+# result; capture the am output and the unfiltered logcat so a failure shows
+# its actual cause. Require the test-build choke point (SYNTHETIC-DISPATCH) -
+# NOT a refusal - with zero actuation attempts.
+adb logcat -c || true
+adb shell am start-foreground-service -n com.palgate.carapp/.GateMonitorService -a com.palgate.carapp.OPEN_NOW --es gateId TEST000001 > "$ART/targeted_am.log" 2>&1 || true
+sleep 5
+adb logcat -d > "$ART/targeted_open.log" 2>/dev/null || true
+adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/targeted_actuation.log" 2>/dev/null || true
+if grep -q 'SYNTHETIC-DISPATCH manual open requested' "$ART/targeted_open.log" && ! grep -q 'OPEN-REFUSED' "$ART/targeted_open.log" && [ ! -s "$ART/targeted_actuation.log" ]; then
+  note "targeted gateId open reached the test-build choke point (SYNTHETIC-DISPATCH), no refusal, zero actuation attempts"
+  row targeted_open gate executed "targeted_open.log + targeted_am.log + empty targeted_actuation.log"
+elif [ -s "$ART/targeted_actuation.log" ]; then
+  gate_block "targeted open caused actuation: $(head -2 "$ART/targeted_actuation.log")"; row targeted_open gate fail "targeted_actuation.log"
+else
+  gate_block "targeted open did not reach SYNTHETIC-DISPATCH: am=$(cat "$ART/targeted_am.log" | head -3) logcat=$(grep -iE 'palgate|AndroidRuntime|Service' "$ART/targeted_open.log" | tail -4)"
+  row targeted_open gate fail "targeted_open.log + targeted_am.log"
+fi
+adb logcat -c || true
+
+
 echo "-- gate: widget hosted render + OPEN dispatch (WidgetHostTest) --"
 # car-compat source guard: widget taps must be service/broadcast PendingIntents only -
 # the Android Auto widget host blocks activity launches ("can't be accessed ... at this time")
@@ -126,25 +150,6 @@ if [ -f widgethost/WidgetHostTest.apk ]; then
 else
   gate_block "WidgetHostTest.apk missing (build step)"; row widgethost gate fail "apk missing"
 fi
-
-echo "-- gate: targeted per-gate open dispatch (car-grid intent path) --"
-# The car grid and per-gate phone taps send ACTION_OPEN_NOW with a gateId extra.
-# Drive that exact path from the shell and require the test-build choke point
-# (SYNTHETIC-DISPATCH) - NOT a refusal - with zero actuation attempts.
-adb logcat -c || true
-adb shell am startservice -n com.palgate.carapp/.GateMonitorService -a com.palgate.carapp.OPEN_NOW --es gateId TEST000001 >/dev/null 2>&1
-sleep 5
-adb logcat -d -s PalGate:I > "$ART/targeted_open.log" 2>/dev/null || true
-adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/targeted_actuation.log" 2>/dev/null || true
-if grep -q 'SYNTHETIC-DISPATCH manual open requested' "$ART/targeted_open.log" && ! grep -q 'OPEN-REFUSED' "$ART/targeted_open.log" && [ ! -s "$ART/targeted_actuation.log" ]; then
-  note "targeted gateId open reached the test-build choke point (SYNTHETIC-DISPATCH), no refusal, zero actuation attempts"
-  row targeted_open gate executed "targeted_open.log + empty targeted_actuation.log"
-elif [ -s "$ART/targeted_actuation.log" ]; then
-  gate_block "targeted open caused actuation: $(head -2 "$ART/targeted_actuation.log")"; row targeted_open gate fail "targeted_actuation.log"
-else
-  gate_block "targeted open did not reach SYNTHETIC-DISPATCH: $(tail -3 "$ART/targeted_open.log")"; row targeted_open gate fail "targeted_open.log"
-fi
-adb logcat -c || true
 
 echo "-- gate: gearhead present --"
 if adb shell pm list packages | grep -q gearhead; then
@@ -254,6 +259,7 @@ if [ "$HUS" = 1 ] && [ -x "$DHU" ]; then
     else
       note "DHU connected (no window capture)"; row dhu gate executed "dhu.log"
     fi
+    DHU_EXECUTED=1
   else
     gate_block "DHU connection unconfirmed (see dhu.log)"; row dhu gate gate-blocked "dhu.log"
   fi
@@ -271,6 +277,11 @@ else
 fi
 
 echo "-- optional: Open Headunit self-mode (experimental) --"
+# Pre-grant OH's location permission: the system dialog's buttons are
+# "While using the app" / "Only this time" / "Don't allow", and a substring
+# match on "Allow" would hit "Don't allow". Granting up front skips it.
+adb shell pm grant com.andrerinas.headunitrevived android.permission.ACCESS_FINE_LOCATION >/dev/null 2>&1 || true
+adb shell pm grant com.andrerinas.headunitrevived android.permission.ACCESS_COARSE_LOCATION >/dev/null 2>&1 || true
 adb shell monkey -p com.andrerinas.headunitrevived -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 8; shot 30_openheadunit
 # first-run wizard ("Welcome to Open Headunit"): skip setup to reach the main
@@ -281,6 +292,7 @@ for i in 1 2 3 4; do
   tap_text "DO IT LATER" >/dev/null 2>&1 && sleep 3
   tap_text "Next" >/dev/null 2>&1 && sleep 3
   tap_text "OK" >/dev/null 2>&1 || true
+  tap_text "While using the app" >/dev/null 2>&1 || true
   tap_text "Allow" >/dev/null 2>&1 || true
   sleep 2
 done
@@ -356,6 +368,13 @@ adb logcat -d | grep -i "PalGate" > "$ART/logcat_palgate.txt" 2>/dev/null || tru
 grep -qi "Bluetooth is off" "$ART/logcat_palgate.txt" && note "app took the graceful Bluetooth-off path (no radio, no real gate action)" || true
 
 shot 40_final
+# Projection is only proven when the DHU gate actually executes; a normal
+# green run means app behavior is green, NOT that projection was tested.
+if [ "${DHU_EXECUTED:-0}" = "1" ]; then
+  row projection info executed "DHU projection actually ran this run"
+else
+  row projection info blocked "no working AA host in CI (emulator gearhead is a stub); projection UNTESTED - user-side host test pending"
+fi
 echo "== summary: $FAILS gate failure(s) =="
 cat "$MATRIX"
 exit $FAILS
