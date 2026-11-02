@@ -14,10 +14,21 @@ OUT="$SRC/out"
 rm -rf "$OUT"
 mkdir -p "$OUT/classes" "$OUT/gen" "$OUT/compiled-res" "$OUT/dex"
 
+MANIFEST="$SRC/AndroidManifest.xml"
 if [ "${TEST_BUILD:-0}" = "1" ]; then
   echo "ci-test-build" > "$SRC/assets/test_build.marker"
   trap 'rm -f "$SRC/assets/test_build.marker"' EXIT
   echo "== TEST_BUILD=1: actuation-disabled marker injected =="
+  # Test builds only: temporarily export GateMonitorService so CI can drive the
+  # exact targeted dispatch (ACTION_OPEN_NOW + gateId) from the shell. The
+  # production manifest keeps it non-exported; the test-marker choke makes
+  # actuation impossible in any build that has this overlay.
+  mkdir -p "$OUT"
+  MANIFEST="$OUT/AndroidManifest.test.xml"
+  sed 's|android:name=".GateMonitorService" android:exported="false"|android:name=".GateMonitorService" android:exported="true"|' \
+    "$SRC/AndroidManifest.xml" > "$MANIFEST"
+  grep -q 'GateMonitorService" android:exported="true"' "$MANIFEST" || { echo "test manifest overlay failed"; exit 1; }
+  echo "== TEST_BUILD=1: GateMonitorService exported (test-only manifest overlay) =="
 fi
 
 echo "== 1/6 aapt2 compile resources =="
@@ -26,7 +37,7 @@ echo "== 1/6 aapt2 compile resources =="
 echo "== 2/6 aapt2 link (base APK + R.java) =="
 mapfile -t FLATS < <(find "$OUT/compiled-res" -name '*.flat' | sort)
 "$BT/aapt2" link -I "$PLAT" \
-  --manifest "$SRC/AndroidManifest.xml" \
+  --manifest "$MANIFEST" \
   --min-sdk-version 23 --target-sdk-version 34 \
   --version-code 5 --version-name 1.4 \
   -A "$SRC/assets" \

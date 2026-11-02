@@ -102,26 +102,24 @@ echo "-- gate: targeted per-gate open dispatch (car-grid intent path) --"
 # result; capture the am output and the unfiltered logcat so a failure shows
 # its actual cause. Require the test-build choke point (SYNTHETIC-DISPATCH) -
 # NOT a refusal - with zero actuation attempts.
-# GateMonitorService is intentionally NOT exported (it handles OPEN intents),
-# so the shell cannot start it: run 7a8ad7d proved "Permission Denial ...
-# not exported from uid" in targeted_am.log. The car grid and the per-gate
-# phone buttons start it in-app; drive that same in-app path by tapping the
-# gate row's OPEN on the gates screen (app foreground, its own uid).
+# GateMonitorService is non-exported in production; TEST_BUILD=1 exports it
+# (test-only manifest overlay, build.sh) so the shell can drive the EXACT
+# targeted dispatch the car grid uses: ACTION_OPEN_NOW + gateId, while the
+# app is foreground (no background-start confound). Phone UI has no per-gate
+# button (PhoneActivity OPEN is generic), so a UI tap cannot test this path.
 adb logcat -c || true
-scrollup; scrollup; scrollup; scrollup
-shot 01d_palgate_gates_tap
-tap_text "OPEN GATE" >/dev/null 2>&1 || tap_text "OPEN" >/dev/null 2>&1 || true
+adb shell am start-foreground-service -n com.palgate.carapp/.GateMonitorService -a com.palgate.carapp.OPEN_NOW --es gateId TEST000001 > "$ART/targeted_am.log" 2>&1 || true
 sleep 5
 adb logcat -d > "$ART/targeted_open.log" 2>/dev/null || true
 adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/targeted_actuation.log" 2>/dev/null || true
 if grep -q 'SYNTHETIC-DISPATCH manual open requested' "$ART/targeted_open.log" && ! grep -q 'OPEN-REFUSED' "$ART/targeted_open.log" && [ ! -s "$ART/targeted_actuation.log" ]; then
   note "targeted gateId open reached the test-build choke point (SYNTHETIC-DISPATCH), no refusal, zero actuation attempts"
-  row targeted_open gate executed "targeted_open.log + 01d_palgate_gates_tap.png + empty targeted_actuation.log"
+  row targeted_open gate executed "targeted_open.log + targeted_am.log + empty targeted_actuation.log"
 elif [ -s "$ART/targeted_actuation.log" ]; then
   gate_block "targeted open caused actuation: $(head -2 "$ART/targeted_actuation.log")"; row targeted_open gate fail "targeted_actuation.log"
 else
-  gate_block "targeted open did not reach SYNTHETIC-DISPATCH: logcat=$(grep -iE 'palgate|AndroidRuntime|Service' "$ART/targeted_open.log" | tail -4)"
-  row targeted_open gate fail "targeted_open.log + 01d_palgate_gates_tap.png"
+  gate_block "targeted open did not reach SYNTHETIC-DISPATCH: am=$(head -3 "$ART/targeted_am.log") logcat=$(grep -iE 'palgate|AndroidRuntime|Service' "$ART/targeted_open.log" | tail -4)"
+  row targeted_open gate fail "targeted_open.log + targeted_am.log"
 fi
 adb logcat -c || true
 
@@ -179,6 +177,26 @@ elif [ -s "$ART/media_actuation.log" ]; then
   gate_block "media probe caused actuation: $(head -2 "$ART/media_actuation.log")"; row media_custom_action gate fail "media_actuation.log"
 else
   gate_block "media custom action did not reach callback: $(tail -3 "$ART/media_probe.log")"; row media_custom_action gate fail "media_probe.log"
+fi
+
+echo "-- gate: simulated-audio media session probe (user proposal, isolated) --"
+# User idea: bring up the media card with a simulated audio session near the
+# gate. This proves the app-side lifecycle: silent PCM still takes audio
+# focus (would duck music/Waze on a real phone), and the custom action still
+# dispatches while PLAYING. Card visibility remains host-side, untestable here.
+adb logcat -c || true
+adb shell am start -n com.palgate.widgethost/.AudioProbeActivity >/dev/null 2>&1
+sleep 8
+adb logcat -d -s PalGateMedia:I > "$ART/audio_probe.log" 2>/dev/null || true
+adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/audio_actuation.log" 2>/dev/null || true
+shot 22_audio_probe
+if grep -q "MEDIA-PROBE(audio) onCustomAction reached" "$ART/audio_probe.log"    && grep -q "focus request (TRANSIENT_MAY_DUCK) result=1 GRANTED" "$ART/audio_probe.log"    && [ ! -s "$ART/audio_actuation.log" ]; then
+  note "simulated-audio session: focus granted (MAY_DUCK), custom action dispatched while PLAYING, zero actuation"
+  row media_audio_focus gate executed "audio_probe.log + 22_audio_probe.png + empty audio_actuation.log"
+elif [ -s "$ART/audio_actuation.log" ]; then
+  gate_block "audio probe caused actuation: $(head -2 "$ART/audio_actuation.log")"; row media_audio_focus gate fail "audio_actuation.log"
+else
+  gate_block "audio probe incomplete: $(tail -4 "$ART/audio_probe.log")"; row media_audio_focus gate fail "audio_probe.log"
 fi
 adb logcat -c || true
 
@@ -316,6 +334,7 @@ adb shell pm grant com.andrerinas.headunitrevived android.permission.ACCESS_COAR
 adb shell pm grant com.andrerinas.headunitrevived android.permission.NEARBY_WIFI_DEVICES >/dev/null 2>&1 || true
 adb shell pm grant com.andrerinas.headunitrevived android.permission.BLUETOOTH_CONNECT >/dev/null 2>&1 || true
 adb shell pm grant com.andrerinas.headunitrevived android.permission.BLUETOOTH_SCAN >/dev/null 2>&1 || true
+adb shell pm grant com.andrerinas.headunitrevived android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
 adb shell monkey -p com.andrerinas.headunitrevived -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 8; shot 30_openheadunit
 # first-run wizard ("Welcome to Open Headunit"): skip setup to reach the main
