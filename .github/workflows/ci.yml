@@ -150,6 +150,11 @@ jobs:
       - name: Build AARE debug APK + desktop head unit (pinned source)
         run: cd "$HOME/aare" && ./gradlew --no-daemon :app:assembleDebug :headunit:installDist --console=plain -q
 
+      - name: Build EncoderProbe.apk (standalone synthetic encoder diagnostic)
+        env:
+          ECJ_JAR: ${{ github.workspace }}/tools/ecj.jar
+        run: ./encoderprobe/build_probe.sh
+
       - name: Download PalGateCar TEST apk
         uses: actions/download-artifact@v4
         with:
@@ -159,6 +164,7 @@ jobs:
         run: |
           mkdir -p stage/headunit
           cp "$HOME/aare/app/build/outputs/apk/debug/app-debug.apk" stage/aare-app-debug.apk
+          cp encoderprobe/EncoderProbe.apk stage/EncoderProbe.apk
           cp PalGateCar.apk stage/PalGateCar.apk
           cp -r "$HOME/aare/headunit/build/install/aare-headunit" stage/headunit/
           sha256sum stage/aare-app-debug.apk stage/PalGateCar.apk
@@ -259,6 +265,10 @@ jobs:
       - name: Run AARE host lane against the redroid phone
         run: AARE_DIR="$PWD" AARE_LAYOUT=dist bash ./ci/aare_test.sh
 
+      - name: Run encoder probe against the redroid phone
+        if: always()
+        run: bash ./ci/encoder_probe.sh
+
       - name: Scan artifact staging for secrets before upload
         if: always()
         run: |
@@ -269,5 +279,50 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aare-host-artifacts
+          path: artifacts/
+          if-no-files-found: warn
+
+  # Same standalone probe on the Google emulator image where the AARE wedge is
+  # fully documented (API 34): discriminates codec-stack vs AARE-app behavior
+  # with guaranteed-animated synthetic input. Synthetic content only.
+  encoder-probe-x86:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: aare-build
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download AARE build outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: aare-build-artifacts
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run encoder probe (API 34 emulator)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis_playstore
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 3072
+          script: bash ./ci/encoder_probe.sh
+
+      - name: Scan artifact staging for secrets before upload
+        if: always()
+        run: |
+          if [ -d artifacts ]; then python3 ci/scan_secrets.py --dir artifacts; fi
+
+      - name: Upload encoder probe artifacts (x86 API 34)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: encoder-probe-artifacts-x86
           path: artifacts/
           if-no-files-found: warn

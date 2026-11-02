@@ -10,3 +10,4 @@ PalGateCar.apk.idsig
 out/
 out2/
 assets/test_build.marker
+*.idsig
