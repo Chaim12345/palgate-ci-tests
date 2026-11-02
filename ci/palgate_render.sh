@@ -7,7 +7,7 @@
 #                           discovery + host binding + session + template render.
 #   Phase B1 (TEST build):  populated grid (2 bundled synthetic gates), item
 #                           titles asserted, then one safe OPEN tap: MUST hit
-#                           the test-marker choke (SYNTHETIC-DISPATCH) and MUST
+#                           the explicit refusal path (background-ineligible) and MUST
 #                           NOT actuate (no BLE/broadcast dispatch markers).
 #   Phase B2 (TEST build):  overflow - seed 5 more synthetic runtime gates
 #                           (root adb only) => 7 total; assert exactly the
@@ -139,19 +139,25 @@ else
     FAIL=1
   fi
 
-  echo "-- safe OPEN tap: must choke at the test marker, must not actuate --"
+  echo "-- safe OPEN tap: background-ineligible state must REFUSE explicitly, never dispatch --"
   tap_text 'Test Gate A' /sdcard/ui_gate.xml || echo "(tap target missing - counted below)"
-  sleep 6
+  sleep 12  # >10s: would catch ForegroundServiceDidNotStartInTimeException if stopSelf failed to cancel the FGS-start timeout
   adb logcat -d -s PalGate:I > "$ART/render_tap_palgate.log" 2>/dev/null || true
   adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN|writeCharacteristic' > "$ART/render_tap_actuation.log" 2>/dev/null || true
-  TAPLOG=0; grep -qE 'SYNTHETIC-DISPATCH|OPEN tapped on car screen' "$ART/render_tap_palgate.log" && TAPLOG=1
+  adb logcat -d | grep -E 'AndroidRuntime|ForegroundServiceDidNotStart' > "$ART/render_tap_crash.log" 2>/dev/null || true
+  REFUSED=0; grep -q 'monitor not started from car UI' "$ART/render_tap_palgate.log" && REFUSED=1
+  DISPATCH=0; grep -q 'SYNTHETIC-DISPATCH' "$ART/render_tap_palgate.log" && DISPATCH=1
   ACT=0; [ -s "$ART/render_tap_actuation.log" ] && ACT=1
-  if [ "$TAPLOG" = "1" ] && [ "$ACT" = "0" ]; then
-    echo "palgate_render_open_blocked,gate,pass,\"car OPEN tap reached app and was choked by the TEST marker (SYNTHETIC-DISPATCH logged); zero actuation markers\"" >> "$MATRIX"
-    echo "PHASE B1 tap OK: blocked, nothing actuated"
+  CRASH=0; [ -s "$ART/render_tap_crash.log" ] && CRASH=1
+  dump_gate_screen "refused"
+  UIOK=0; grep -q 'FAILED' "$ART/render_ui_gate_refused.xml" 2>/dev/null \
+     && grep -qi 'monitoring off' "$ART/render_ui_gate_refused.xml" 2>/dev/null && UIOK=1
+  if [ "$REFUSED" = "1" ] && [ "$DISPATCH" = "0" ] && [ "$ACT" = "0" ] && [ "$CRASH" = "0" ] && [ "$UIOK" = "1" ]; then
+    echo "palgate_render_open_blocked,gate,pass,\"car OPEN tap with monitor off in a background-ineligible state: explicit refusal on the car UI (FAILED + monitoring-off guidance), NO dispatch, zero actuation, no crash, no FGS-timeout ANR (>10s window). LIMIT: promotion-success path (choked SYNTHETIC-DISPATCH) is exercised in aa_test (foreground), not in this AARE background state\"" >> "$MATRIX"
+    echo "PHASE B1 tap OK: explicit refusal, nothing dispatched or actuated"
   else
-    echo "palgate_render_open_blocked,gate,fail,\"taplog=$TAPLOG actuation=$ACT (render_tap_palgate.log / render_tap_actuation.log)\"" >> "$MATRIX"
-    echo "::error::PHASE B1 tap FAILED or ACTUATION MARKERS PRESENT"
+    echo "palgate_render_open_blocked,gate,fail,\"refused=$REFUSED dispatch=$DISPATCH actuation=$ACT crash=$CRASH ui=$UIOK (render_tap_*.log, render_ui_gate_refused.xml)\"" >> "$MATRIX"
+    echo "::error::PHASE B1 tap FAILED"
     FAIL=1
   fi
 fi

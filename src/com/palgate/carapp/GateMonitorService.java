@@ -140,21 +140,34 @@ public class GateMonitorService extends Service {
             if (!listening) stopSelf();
             return START_NOT_STICKY;
         }
-        if (ACTION_OPEN_NOW.equals(action)) {
-            manualOpen(intent.getStringExtra("gateId"));
-            // fallthrough: keep running (or start properly below if not yet)
-        }
         if (!listening) {
             if (!startAsForeground()) {
                 // Terminal: never register GPS/BLE listeners without the
-                // foreground service (background registration would fail or
-                // misbehave), and do not stay sticky. The car screen does not
-                // need the monitor: templates render from State + Gate.load,
-                // and OPEN dispatch already ran in manualOpen above.
+                // foreground service, do not stay sticky, and NEVER start
+                // real actuation from a lifecycle state Android refused -
+                // a stopSelf after dispatch would tear the BLE thread down
+                // mid-open, unobserved (review finding on f66a777). An OPEN
+                // tap fails loudly instead: explicit FAILED phase on the car
+                // screen (templates render from State + Gate.load, so the
+                // screen keeps working with the monitor off).
+                if (ACTION_OPEN_NOW.equals(action)) {
+                    Log.i("PalGate", "OPEN refused: monitor off and background start ineligible - nothing dispatched");
+                    State.get().post(new Runnable() {
+                        @Override public void run() {
+                            State.get().phase = State.PHASE_FAILED;
+                            State.get().phaseDetail = "monitoring off - start it from the phone app, then tap again";
+                        }
+                    });
+                }
                 stopSelf();
                 return START_NOT_STICKY;
             }
             startListening();
+        }
+        if (ACTION_OPEN_NOW.equals(action)) {
+            // Reached only with a live, promoted foreground service: safe to
+            // dispatch (the ioThread outlives the open attempt).
+            manualOpen(intent.getStringExtra("gateId"));
         }
         return START_STICKY;
     }
@@ -207,6 +220,8 @@ public class GateMonitorService extends Service {
             }
             return true;
         } catch (SecurityException se) {
+            Log.i("PalGate", "monitor not started from car UI (SecurityException): "
+                    + "background location start ineligible - start it from the phone app");
             State.get().log("monitor not started from car UI (" + se.getClass().getSimpleName()
                     + "): Android blocks background location monitoring - "
                     + "start it from the PalGate Car phone app");
