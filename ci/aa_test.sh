@@ -95,6 +95,37 @@ adb shell input swipe $CX $QY $CX $LY 300 >/dev/null 2>&1; sleep 1
 adb shell input swipe $CX $QY $CX $LY 300 >/dev/null 2>&1; sleep 1
 shot 01a_palgate_top
 
+echo "-- gate: OPEN with location permission revoked must REFUSE explicitly (failure path, synthetic fixtures) --"
+# Failure-path proof with the synthetic actuator counter: revoke the location
+# permission, drive the exact OPEN_NOW + gateId intent, and require the
+# explicit refusal branch - no SYNTHETIC-DISPATCH, zero actuation markers, no
+# crash. (pm revoke kills the app process; the service restart is fresh.)
+adb shell pm revoke com.palgate.carapp android.permission.ACCESS_FINE_LOCATION >/dev/null 2>&1 || true
+adb shell pm revoke com.palgate.carapp android.permission.ACCESS_COARSE_LOCATION >/dev/null 2>&1 || true
+sleep 2
+adb logcat -c || true
+adb shell am start-foreground-service -n com.palgate.carapp/.GateMonitorService -a com.palgate.carapp.OPEN_NOW --es gateId TEST000001 > "$ART/targeted_refused_am.log" 2>&1 || true
+sleep 6
+adb logcat -d | grep -iE 'palgate|AndroidRuntime|FATAL' > "$ART/targeted_refused.log" 2>/dev/null || true
+adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/targeted_refused_actuation.log" 2>/dev/null || true
+if grep -q 'monitor not started from car UI' "$ART/targeted_refused.log" \
+   && grep -q 'OPEN refused' "$ART/targeted_refused.log" \
+   && ! grep -q 'SYNTHETIC-DISPATCH' "$ART/targeted_refused.log" \
+   && ! grep -qiE 'AndroidRuntime|FATAL' "$ART/targeted_refused.log" \
+   && [ ! -s "$ART/targeted_refused_actuation.log" ]; then
+  note "permission-missing OPEN refused explicitly: no dispatch, zero actuation, no crash"
+  row targeted_open_refused gate executed "targeted_refused.log + targeted_refused_am.log + empty targeted_refused_actuation.log"
+elif [ -s "$ART/targeted_refused_actuation.log" ]; then
+  gate_block "refused-path OPEN caused actuation: $(head -2 "$ART/targeted_refused_actuation.log")"; row targeted_open_refused gate fail "targeted_refused_actuation.log"
+else
+  gate_block "permission-missing OPEN did not take the refusal branch: am=$(head -3 "$ART/targeted_refused_am.log") logcat=$(tail -4 "$ART/targeted_refused.log")"
+  row targeted_open_refused gate fail "targeted_refused.log + targeted_refused_am.log"
+fi
+# restore eligibility for the success path below (revoke killed the process)
+adb shell pm grant com.palgate.carapp android.permission.ACCESS_FINE_LOCATION || true
+adb shell pm grant com.palgate.carapp android.permission.ACCESS_COARSE_LOCATION || true
+adb shell monkey -p com.palgate.carapp -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 6
+
 echo "-- gate: targeted per-gate open dispatch (car-grid intent path) --"
 # The car grid and per-gate phone taps send ACTION_OPEN_NOW with a gateId extra.
 # Drive that exact path now, WHILE THE APP IS FOREGROUND (phone UI just

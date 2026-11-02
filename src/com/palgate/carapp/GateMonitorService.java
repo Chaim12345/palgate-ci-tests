@@ -263,11 +263,6 @@ public class GateMonitorService extends Service {
             stopSelf();
             return false;
         }
-        listening = true;
-        State.get().post(new Runnable() {
-            @Override public void run() { State.get().monitoring = true; }
-        });
-
         Criteria fine = new Criteria();
         fine.setAccuracy(Criteria.ACCURACY_FINE);
         try {
@@ -289,7 +284,15 @@ public class GateMonitorService extends Service {
         lastSmForClosing = Double.MAX_VALUE;
         closingEwma = 0;
         lastMile = -1;
-        requestLocations();
+        if (!requestLocations()) {
+            // Terminal (permission missing): requestLocations stopped the
+            // service - the caller must not mark listening or dispatch.
+            return false;
+        }
+        listening = true;
+        State.get().post(new Runnable() {
+            @Override public void run() { State.get().monitoring = true; }
+        });
 
         registerCarBtWatcher();
         if (State.Prefs.get().triggerMode != State.TRIG_GPS && scanner != null) {
@@ -305,7 +308,12 @@ public class GateMonitorService extends Service {
     }
 
     /** (Re)request location streams with the current tier's intervals. */
-    private void requestLocations() {
+    /**
+     * Returns false only on the terminal branch: location permission missing
+     * (SecurityException) - a location monitor without location permission is
+     * useless, so the service stops and the caller must not dispatch.
+     */
+    private boolean requestLocations() {
         try {
             lm.removeUpdates(locationListener);
         } catch (Exception ignored) {
@@ -322,7 +330,7 @@ public class GateMonitorService extends Service {
         } catch (SecurityException e) {
             State.get().log("monitor: location permission missing — open the PalGate app");
             stopSelf();
-            return;
+            return false;
         } catch (Exception e) {
             State.get().log("monitor: GPS unavailable (" + e + ") — trying network");
         }
@@ -339,6 +347,7 @@ public class GateMonitorService extends Service {
             } catch (Exception ignored) {
             }
         }
+        return true;
     }
 
     /** Tier transitions with hysteresis so we don't churn the radio. */
