@@ -5,7 +5,7 @@
 # render proof only (headless PNGs); tap scripts get added from inspected
 # coordinates, not guessed blind.
 set -uo pipefail
-ART=artifacts; mkdir -p "$ART"
+ART=artifacts; mkdir -p "$ART" "$ART/aare"
 MATRIX="$ART/results.csv"
 echo "check,tier,result,evidence" > "$MATRIX"
 AARE_DIR="${AARE_DIR:-$HOME/aare}"
@@ -76,6 +76,11 @@ ls -la "$ART/aare" 2>/dev/null | head
 
 adb logcat -d -s PalGate:I > "$ART/aare_palgate.log" 2>/dev/null || true
 adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/aare_actuation.log" 2>/dev/null || true
+
+# The artifact secret scan patterns-match 40-hex blobs; third-party headunit
+# logs may contain session/cert material. Mask 40-hex in the untrusted-source
+# logs (evidence value preserved; everything else stays verbatim).
+sed -i -E 's/\b[0-9a-fA-F]{40}\b/[hex40]/g' "$ART/aare_hu.log" "$ART/aare_actuation.log" 2>/dev/null || true
 
 PNG=$(ls "$ART"/aare/*.png 2>/dev/null | head -1)
 if [ -n "$PNG" ] && [ ! -s "$ART/aare_actuation.log" ]; then

@@ -169,7 +169,7 @@ jobs:
           target: google_apis_playstore
           arch: x86_64
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 3072
-          script: AARE_DIR=$HOME/aare sh ./ci/aare_test.sh
+          script: AARE_DIR=$HOME/aare bash ./ci/aare_test.sh
 
       - name: Scan artifact staging for secrets before upload
         if: always()

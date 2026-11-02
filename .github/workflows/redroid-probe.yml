@@ -50,15 +50,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -x
-          # Newest repo artifact with this name regardless of run conclusion
-          # (a run with a failed optional lane still carries a good APK).
-          AID=$(gh api "repos/Chaim12345/palgate-ci-tests/actions/artifacts?per_page=1&name=PalGateCar-TEST-no-actuation" -q '.artifacts[0].id')
-          echo "artifact id: $AID"
-          [ -n "$AID" ] && [ "$AID" != "null" ] || { echo "no TEST APK artifact found"; exit 1; }
+          # Trust gate: newest non-expired artifact with this name ONLY from a
+          # ci.yml run on this branch in this repository - never a fork/PR or
+          # an arbitrary newest upload.
+          REPO_ID=$(gh api repos/Chaim12345/palgate-ci-tests -q .id)
+          gh api "repos/Chaim12345/palgate-ci-tests/actions/artifacts?per_page=20&name=PalGateCar-TEST-no-actuation" > /tmp/arts.json
+          ROW=$(jq -r --arg rid "$REPO_ID" '.artifacts[] | select(.expired == false and (.workflow_run.head_repository_id|tostring) == $rid and .workflow_run.head_branch == "ci/dhu-widget-host") | [.id, .workflow_run.id, .workflow_run.head_sha] | @tsv' /tmp/arts.json | head -1)
+          AID=$(echo "$ROW" | cut -f1); WRID=$(echo "$ROW" | cut -f2); SHA=$(echo "$ROW" | cut -f3)
+          echo "artifact=$AID run=$WRID commit=$SHA"
+          [ -n "$AID" ] || { echo "no trusted TEST APK artifact found"; exit 1; }
+          WPATH=$(gh api "repos/Chaim12345/palgate-ci-tests/actions/runs/$WRID" -q .path)
+          [ "$WPATH" = ".github/workflows/ci.yml" ] || { echo "artifact from untrusted workflow: $WPATH"; exit 1; }
+          gh api "repos/Chaim12345/palgate-ci-tests/commits/$SHA" -q .sha | grep -q "$SHA" || { echo "source commit not in repo"; exit 1; }
+          echo "trust gate passed: ci.yml run $WRID at $SHA"
           mkdir -p apk
           gh api "repos/Chaim12345/palgate-ci-tests/actions/artifacts/$AID/zip" > apk/apk.zip
           cd apk && unzip -o apk.zip && rm apk.zip && cd ..
           ls -la apk/
+          sha256sum apk/PalGateCar.apk
           # No-actuation guarantee: the test marker must be inside the APK.
           unzip -l apk/PalGateCar.apk | grep -q 'assets/test_build.marker' && echo "TEST MARKER PRESENT - actuation disabled build"
 
@@ -74,7 +83,10 @@ jobs:
             androidboot.redroid_width=720 androidboot.redroid_height=1280 androidboot.redroid_dpi=320
           sleep 10
           docker ps --filter name=redroid --format '{{.Status}}'
-          adb connect localhost:5555
+          for i in $(seq 1 12); do
+            adb connect localhost:5555 && break
+            sleep 5
+          done
           for i in $(seq 1 48); do
             BC=$(adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             echo "boot poll $i: boot_completed=$BC"
