@@ -3,6 +3,8 @@ package com.palgate.carapp;
 import android.content.Intent;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.util.Log;
 
 import androidx.car.app.CarContext;
 import androidx.car.app.CarToast;
@@ -17,8 +19,6 @@ import androidx.car.app.model.Template;
 import androidx.core.graphics.drawable.IconCompat;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -43,16 +43,19 @@ public class GateGridScreen extends Screen implements State.Listener {
      *  limit via ConstraintManager wins when the negotiated API allows it. */
     private static final int FALLBACK_GRID_LIMIT = 6;
 
-    /** A GPS fix older than this is stale: never sort or display by it. */
+    /** A fix older than this (on the elapsedRealtime clock) is stale:
+     *  never display distances from it. */
     private static final long FIX_FRESH_MS = 30_000;
 
-    /** Session-stable gate ordering (gate ids): computed ONCE so the ~1/s
-     *  template refresh can never shuffle tap targets under a driver's
-     *  finger. Recomputed only when a brand-new Screen instance is created
-     *  (new session), never on invalidate(). */
+    /** Session-stable gate ordering (gate ids): the CONFIGURED order, frozen
+     *  at first render so the ~1/s refresh can never shuffle tap targets
+     *  under a driver's finger. Deliberately no distance-based reordering:
+     *  any mid-session reorder IS a visible shuffle (actuation risk), and a
+     *  sort applied only at session start is usually dead (no fix yet).
+     *  Distance still shows per item in the subtitle when the fix is fresh. */
     private List<String> frozenOrder;
-    private boolean frozenByDistance;
 
+    private boolean freshnessInvalidateScheduled;
     private long lastInvalidateAt;
     private boolean invalidateQueued;
     private String lastToastKey = "";
@@ -79,18 +82,14 @@ public class GateGridScreen extends Screen implements State.Listener {
                     .build());
         } else {
             List<Gate> show = applySessionOrder(gates, s);
-            String capNote = "";
             if (show.size() > limit) {
                 // Hosts reject the whole template above the content limit.
                 // Disclose the cap inside a normal template title (no extra
                 // items, no invalid template); the full list stays in the
                 // phone app.
-                capNote = frozenByDistance
-                        ? " (nearest " + limit + " of " + show.size() + ")"
-                        : " (first " + limit + " of " + show.size() + ")";
+                title += " (first " + limit + " of " + show.size() + ")";
                 show = new ArrayList<>(show.subList(0, limit));
             }
-            title += capNote;
             for (final Gate g : show) {
                 list.addItem(new GridItem.Builder()
                         .setTitle(g.name)
@@ -103,6 +102,7 @@ public class GateGridScreen extends Screen implements State.Listener {
             }
         }
 
+        scheduleFreshnessExpiry(s);
         return new GridTemplate.Builder()
                 .setTitle(title)
                 .setHeaderAction(Action.APP_ICON)
@@ -110,46 +110,37 @@ public class GateGridScreen extends Screen implements State.Listener {
                 .build();
     }
 
-    /** Host-reported grid limit when available (ConstraintManager is
-     *  @RequiresCarApi(2); getCarAppApiLevel() itself is API-1 safe), else
-     *  the library's own default. */
+    /** Grid content limit: the library's driving-optimized default (6) is
+     *  the ceiling; a host-reported limit (ConstraintManager is
+     *  @RequiresCarApi(2); getCarAppApiLevel() itself is API-1 safe) can only
+     *  tighten it. Query failures are logged, never silent. */
     private int gridContentLimit() {
         try {
             if (getCarContext().getCarAppApiLevel() >= 2) {
                 ConstraintManager cm = (ConstraintManager) getCarContext()
                         .getCarService(ConstraintManager.class);
                 int limit = cm.getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_GRID);
-                if (limit > 0) return limit;
+                if (limit > 0) return Math.min(limit, FALLBACK_GRID_LIMIT);
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            Log.w("PalGate", "grid content limit query failed, using library default "
+                    + FALLBACK_GRID_LIMIT + ": " + e);
         }
         return FALLBACK_GRID_LIMIT;
     }
 
     private static boolean freshFix(State s) {
-        return s.hasFix && s.lastFixAtMs > 0
-                && System.currentTimeMillis() - s.lastFixAtMs <= FIX_FRESH_MS;
+        if (!s.hasFix || s.lastFixElapsedNs <= 0) return false;
+        long ageNs = SystemClock.elapsedRealtimeNanos() - s.lastFixElapsedNs;
+        return ageNs >= 0 && ageNs <= FIX_FRESH_MS * 1_000_000L;
     }
 
-    /** Compute the gate ordering once per screen session, then freeze it.
-     *  Nearest-first only when the fix is FRESH (a sticky/stale fix must not
-     *  silently reorder targets); otherwise the configured order. Gates that
-     *  appear later append at the end; removed gates drop out. */
+    /** Freeze the CONFIGURED order at first render; late arrivals append,
+     *  removed gates drop out. Never reorders afterwards. */
     private List<Gate> applySessionOrder(List<Gate> gates, State s) {
         if (frozenOrder == null) {
-            List<Gate> ordered = new ArrayList<>(gates);
-            frozenByDistance = freshFix(s);
-            if (frozenByDistance) {
-                final double lat = s.lat;
-                final double lng = s.lng;
-                Collections.sort(ordered, new Comparator<Gate>() {
-                    @Override public int compare(Gate a, Gate b) {
-                        return Double.compare(a.distanceM(lat, lng), b.distanceM(lat, lng));
-                    }
-                });
-            }
             frozenOrder = new ArrayList<>();
-            for (Gate g : ordered) frozenOrder.add(g.id);
+            for (Gate g : gates) frozenOrder.add(g.id);
         }
         List<Gate> show = new ArrayList<>();
         for (String id : frozenOrder) {
@@ -164,6 +155,23 @@ public class GateGridScreen extends Screen implements State.Listener {
             }
         }
         return show;
+    }
+
+    /** When the subtitle shows a live distance, schedule exactly one extra
+     *  invalidate at the moment the fix ages out so the distance flips to
+     *  "no fresh GPS fix" even if no state change arrives. */
+    private void scheduleFreshnessExpiry(State s) {
+        if (freshnessInvalidateScheduled || !freshFix(s)) return;
+        long ageMs = (SystemClock.elapsedRealtimeNanos() - s.lastFixElapsedNs) / 1_000_000L;
+        long remaining = FIX_FRESH_MS - ageMs + 250;
+        if (remaining <= 0) return;
+        freshnessInvalidateScheduled = true;
+        uiH.postDelayed(new Runnable() {
+            @Override public void run() {
+                freshnessInvalidateScheduled = false;
+                invalidate();
+            }
+        }, remaining);
     }
 
     private CarIcon icon() {

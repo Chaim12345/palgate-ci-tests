@@ -21,11 +21,11 @@ restore_test_overlays() {
     rm -f "$OUT/gates.json.orig"
   fi
 }
+trap restore_test_overlays EXIT
 
 MANIFEST="$SRC/AndroidManifest.xml"
 if [ "${TEST_BUILD:-0}" = "1" ]; then
   echo "ci-test-build" > "$SRC/assets/test_build.marker"
-  trap restore_test_overlays EXIT
   echo "== TEST_BUILD=1: actuation-disabled marker injected =="
   # Test builds only: temporarily export GateMonitorService so CI can drive the
   # exact targeted dispatch (ACTION_OPEN_NOW + gateId) from the shell. The
@@ -33,10 +33,13 @@ if [ "${TEST_BUILD:-0}" = "1" ]; then
   # actuation impossible in any build that has this overlay.
   mkdir -p "$OUT"
   MANIFEST="$OUT/AndroidManifest.test.xml"
-  sed 's|android:name=".GateMonitorService" android:exported="false"|android:name=".GateMonitorService" android:exported="true"|' \
+  sed -e 's|android:name=".GateMonitorService" android:exported="false"|android:name=".GateMonitorService" android:exported="true"|' \
+      -e 's|<application|<application android:debuggable="true"|' \
     "$SRC/AndroidManifest.xml" > "$MANIFEST"
   grep -q 'GateMonitorService" android:exported="true"' "$MANIFEST" || { echo "test manifest overlay failed"; exit 1; }
-  echo "== TEST_BUILD=1: GateMonitorService exported (test-only manifest overlay) =="
+  grep -q '<application android:debuggable="true"' "$MANIFEST" || { echo "test debuggable overlay failed"; exit 1; }
+  [ "$(grep -c 'android:debuggable' "$MANIFEST")" = "1" ] || { echo "unexpected debuggable count"; exit 1; }
+  echo "== TEST_BUILD=1: GateMonitorService exported + debuggable (test-only manifest overlays; enable CI dispatch + run-as seeding) =="
   if [ "${EMPTY_GATES:-0}" = "1" ]; then
     # Empty-state render proof variant: no bundled synthetic gates, so the
     # car screen must render its empty template. TEST builds only.
@@ -44,6 +47,14 @@ if [ "${TEST_BUILD:-0}" = "1" ]; then
     printf '{"gates":[]}' > "$SRC/assets/gates.json"
     echo "== TEST_BUILD=1 EMPTY_GATES=1: bundled gate fixtures emptied (empty-state variant) =="
   fi
+else
+  # Production never ships the synthetic test fixtures: Gate.load reads
+  # assets/gates.json in every build, while real user gates live in runtime
+  # SharedPreferences (untouched). Without this the production APK would
+  # bundle "Test Gate A/B" and a fake key.
+  cp "$SRC/assets/gates.json" "$OUT/gates.json.orig"
+  printf '{"gates":[]}' > "$SRC/assets/gates.json"
+  echo "== production: synthetic bundled fixtures excluded (runtime prefs preserved) =="
 fi
 
 echo "== 1/6 aapt2 compile resources =="
@@ -104,14 +115,22 @@ if [ "${TEST_BUILD:-0}" = "1" ]; then
     || { echo "FAIL: TEST build missing actuation-choke marker"; exit 1; }
   grep -A4 'GateMonitorService' "$OUT/manifest.txt" | grep -qE 'exported.*(0xffffffff|=true|0x1\b)' \
     || { echo "FAIL: TEST overlay did not export GateMonitorService"; exit 1; }
-  echo "ok: TEST artifact = NON-PRODUCTION (marker present -> actuation choked + ALLOW_ALL host validation; monitor exported for CI dispatch)"
+  grep -q 'android:debuggable.*=true' "$OUT/manifest.txt" \
+    || { echo "FAIL: TEST overlay missing debuggable"; exit 1; }
+  echo "ok: TEST artifact = NON-PRODUCTION (marker present -> actuation choked + ALLOW_ALL host validation; monitor exported + debuggable for CI)"
 else
   if unzip -l "$SRC/PalGateCar.apk" | grep -q 'assets/test_build.marker'; then
     echo "FAIL: production build contains test marker"; exit 1
   fi
   grep -A4 'GateMonitorService' "$OUT/manifest.txt" | grep -qE 'exported.*(0x0\b|=false)' \
     || { echo "FAIL: production GateMonitorService must stay unexported"; exit 1; }
-  echo "ok: production artifact (no marker -> strict hosts_allowlist validation; monitor unexported)"
+  if grep -q 'android:debuggable.*=true' "$OUT/manifest.txt"; then
+    echo "FAIL: production build must not be debuggable"; exit 1
+  fi
+  if unzip -p "$SRC/PalGateCar.apk" assets/gates.json | grep -qiE 'TEST000|SYNTHETIC|00112233445566778899AABBCCDDEEFF'; then
+    echo "FAIL: production APK bundles synthetic gate fixtures"; exit 1
+  fi
+  echo "ok: production artifact (no marker -> strict hosts_allowlist validation; monitor unexported; not debuggable; no synthetic fixtures)"
 fi
 
 echo "== done: $SRC/PalGateCar.apk =="

@@ -148,11 +148,19 @@ else
 fi
 
 echo "== Phase B2: overflow (7 synthetic gates -> host limit shown, cap disclosed) =="
-ROOT=0; [ "$(adb shell id -u 2>/dev/null | tr -d '\r')" = "0" ] && ROOT=1
-if [ "$ROOT" != "1" ]; then
-  echo "palgate_render_overflow,gate,blocked,\"adb not root on this device: cannot seed runtime gates - NOT attempted (not a pass)\"" >> "$MATRIX"
-  echo "PHASE B2 NOT ATTEMPTED (no root adb)"
+# Seeding route: run-as on the debuggable TEST build (no root needed), root
+# adb as fallback; if neither exists this phase is explicitly NOT attempted.
+SEED_MODE=""
+if adb shell run-as com.palgate.carapp true >/dev/null 2>&1; then
+  SEED_MODE="run-as"
+elif [ "$(adb shell id -u 2>/dev/null | tr -d '\r')" = "0" ]; then
+  SEED_MODE="root"
+fi
+if [ -z "$SEED_MODE" ]; then
+  echo "palgate_render_overflow,gate,blocked,\"no run-as (non-debuggable build?) and no root adb: cannot seed runtime gates - NOT attempted (not a pass)\"" >> "$MATRIX"
+  echo "PHASE B2 NOT ATTEMPTED (no seeding route)"
 else
+  echo "seeding route: $SEED_MODE"
   python3 - <<'PYSEED'
 import json, subprocess
 gates = [{"id": f"TEST00000{i}", "name": f"Test Gate {chr(64+i)} (SYNTHETIC)",
@@ -166,9 +174,16 @@ open("/tmp/seed_prefs.xml", "w").write(xml)
 PYSEED
   adb shell am force-stop com.palgate.carapp >/dev/null 2>&1 || true
   adb push /tmp/seed_prefs.xml /data/local/tmp/seed_prefs.xml >/dev/null 2>&1
-  OWNER=$(adb shell stat -c '%u:%g' /data/data/com.palgate.carapp 2>/dev/null | tr -d '\r')
-  adb shell "mkdir -p /data/data/com.palgate.carapp/shared_prefs && cp /data/local/tmp/seed_prefs.xml /data/data/com.palgate.carapp/shared_prefs/palgate_car.xml && chown $OWNER /data/data/com.palgate.carapp/shared_prefs/palgate_car.xml && chmod 660 /data/data/com.palgate.carapp/shared_prefs/palgate_car.xml" \
-    && echo "seeded 5 synthetic runtime gates (7 total with bundled fixtures)"
+  # Fresh CI install: wholesale replace of the app's prefs file is safe here
+  # (only synthetic runtime_gates content; never a user device).
+  if [ "$SEED_MODE" = "run-as" ]; then
+    adb shell "run-as com.palgate.carapp sh -c 'mkdir -p shared_prefs && cat /data/local/tmp/seed_prefs.xml > shared_prefs/palgate_car.xml'" \
+      && echo "seeded 5 synthetic runtime gates via run-as (7 total with bundled fixtures)"
+  else
+    OWNER=$(adb shell stat -c '%u:%g' /data/data/com.palgate.carapp 2>/dev/null | tr -d '\r')
+    adb shell "mkdir -p /data/data/com.palgate.carapp/shared_prefs && cp /data/local/tmp/seed_prefs.xml /data/data/com.palgate.carapp/shared_prefs/palgate_car.xml && chown $OWNER /data/data/com.palgate.carapp/shared_prefs/palgate_car.xml && chmod 660 /data/data/com.palgate.carapp/shared_prefs/palgate_car.xml" \
+      && echo "seeded 5 synthetic runtime gates via root (7 total with bundled fixtures)"
+  fi
   adb shell am force-stop com.palgate.carapp >/dev/null 2>&1 || true
   adb logcat -c || true
   if ! open_preview; then

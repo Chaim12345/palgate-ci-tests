@@ -407,7 +407,7 @@ public class GateMonitorService extends Service {
         s.fixProvider = provider;
 
         long now = System.currentTimeMillis();
-        s.lastFixAtMs = now;
+        s.lastFixElapsedNs = fixElapsedNs;
         int radius = State.Prefs.get().radiusM;
         boolean qualified = Approach.freshQualified(fixElapsedNs, acc, radius, nowNs);
         s.fixQualified = qualified;

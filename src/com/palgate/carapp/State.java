@@ -43,7 +43,7 @@ public final class State {
 
     // ---- location (latest fix, raw) ---------------------------------------
     public boolean hasFix;
-    public long lastFixAtMs;
+    public long lastFixElapsedNs; // fix timestamp on the elapsedRealtime clock
     public double lat, lng, bearing;
     public float speed, accuracy;
     public String fixProvider = "";
