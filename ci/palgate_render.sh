@@ -130,12 +130,19 @@ else
   UI="$ART/render_ui_gate_populated.xml"
   # The Monitor-off status card takes the first viewport cell, so the
   # composed viewport shows only ONE gate; union one scroll like B2.
-  adb shell input swipe 600 520 600 260 300 >/dev/null 2>&1; sleep 2
-  adb shell uiautomator dump /sdcard/ui_gate.xml >/dev/null 2>&1
-  adb shell cat /sdcard/ui_gate.xml > "$ART/render_ui_gate_populated_scroll1.xml" 2>/dev/null || true
-  ITEMS=$(cat "$UI" "$ART/render_ui_gate_populated_scroll1.xml" 2>/dev/null | grep -o 'text="Test Gate [A-Z] (SYNTHETIC)' | sort -u | wc -l)
-  echo "visible synthetic gate items (viewport + 1 scroll): $ITEMS"
-  if grep -q 'PalGate - ' "$UI" && [ "$ITEMS" -eq 2 ] && [ -s "$ART/palgate_render_populated.png" ]; then
+  # A single swipe is not reliably registered by the host (observed: dump
+  # unchanged after one swipe), so retry up to 4 times until 2 gates are seen.
+  : > "$ART/render_ui_gate_populated_scroll1.xml"
+  ITEMS=$(grep -o 'text="Test Gate [A-Z] (SYNTHETIC)' "$UI" | sort -u | wc -l)
+  for k in 1 2 3 4; do
+    [ "$ITEMS" -ge 2 ] && break
+    adb shell input swipe 600 520 600 260 300 >/dev/null 2>&1; sleep 2
+    adb shell uiautomator dump /sdcard/ui_gate.xml >/dev/null 2>&1
+    adb shell cat /sdcard/ui_gate.xml > "$ART/render_ui_gate_populated_scroll1.xml" 2>/dev/null || true
+    ITEMS=$(cat "$UI" "$ART/render_ui_gate_populated_scroll1.xml" 2>/dev/null | grep -o 'text="Test Gate [A-Z] (SYNTHETIC)' | sort -u | wc -l)
+  done
+  echo "visible synthetic gate items (viewport + up to 4 scrolls): $ITEMS"
+  if grep -q 'PalGate - ' "$UI" && [ "$ITEMS" -ge 2 ] && [ -s "$ART/palgate_render_populated.png" ]; then
     echo "palgate_render_populated,gate,pass,\"2 synthetic gates rendered with titles (AARE third-party host): render_ui_gate_populated.xml + png\"" >> "$MATRIX"
     echo "PHASE B1 render OK"
   else
@@ -223,7 +230,7 @@ PYSEED
     # cells at 640x360). Prove reachability by scrolling and unioning dumps.
     SEEN=$(grep -oE 'Test Gate [A-Z] \(SYNTHETIC\)|\+[0-9]+ more gates|Monitor off' "$UI" 2>/dev/null)
     SCROLLED=0
-    for i in 1 2 3; do
+    for i in 1 2 3 4 5 6; do
       adb shell input swipe 600 520 600 260 300 >/dev/null 2>&1; sleep 2
       adb shell uiautomator dump /sdcard/ui_gate.xml >/dev/null 2>&1
       adb shell cat /sdcard/ui_gate.xml > "$ART/render_ui_gate_overflow_scroll$i.xml" 2>/dev/null || true
