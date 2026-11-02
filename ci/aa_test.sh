@@ -80,6 +80,9 @@ if adb install -r PalGateCar.apk; then note "PalGateCar.apk installed"; row inst
 adb install -r open-headunit.apk >/dev/null 2>&1 && opt "Open Headunit installed (compat tier)" || opt "Open Headunit install failed (compat tier)"
 adb shell pm grant com.palgate.carapp android.permission.ACCESS_FINE_LOCATION || true
 adb shell pm grant com.palgate.carapp android.permission.ACCESS_COARSE_LOCATION || true
+adb shell pm grant com.palgate.carapp android.permission.NEARBY_WIFI_DEVICES >/dev/null 2>&1 || true
+adb shell pm grant com.palgate.carapp android.permission.BLUETOOTH_CONNECT >/dev/null 2>&1 || true
+adb shell pm grant com.palgate.carapp android.permission.BLUETOOTH_SCAN >/dev/null 2>&1 || true
 adb emu geo fix 34.7818 32.0853 >/dev/null 2>&1 && note "geo fix set (synthetic fixture coords)" || true
 adb shell monkey -p com.palgate.carapp -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 6
 shot 01_palgate_phone
@@ -99,19 +102,26 @@ echo "-- gate: targeted per-gate open dispatch (car-grid intent path) --"
 # result; capture the am output and the unfiltered logcat so a failure shows
 # its actual cause. Require the test-build choke point (SYNTHETIC-DISPATCH) -
 # NOT a refusal - with zero actuation attempts.
+# GateMonitorService is intentionally NOT exported (it handles OPEN intents),
+# so the shell cannot start it: run 7a8ad7d proved "Permission Denial ...
+# not exported from uid" in targeted_am.log. The car grid and the per-gate
+# phone buttons start it in-app; drive that same in-app path by tapping the
+# gate row's OPEN on the gates screen (app foreground, its own uid).
 adb logcat -c || true
-adb shell am start-foreground-service -n com.palgate.carapp/.GateMonitorService -a com.palgate.carapp.OPEN_NOW --es gateId TEST000001 > "$ART/targeted_am.log" 2>&1 || true
+scrollup; scrollup; scrollup; scrollup
+shot 01d_palgate_gates_tap
+tap_text "OPEN GATE" >/dev/null 2>&1 || tap_text "OPEN" >/dev/null 2>&1 || true
 sleep 5
 adb logcat -d > "$ART/targeted_open.log" 2>/dev/null || true
 adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/targeted_actuation.log" 2>/dev/null || true
 if grep -q 'SYNTHETIC-DISPATCH manual open requested' "$ART/targeted_open.log" && ! grep -q 'OPEN-REFUSED' "$ART/targeted_open.log" && [ ! -s "$ART/targeted_actuation.log" ]; then
   note "targeted gateId open reached the test-build choke point (SYNTHETIC-DISPATCH), no refusal, zero actuation attempts"
-  row targeted_open gate executed "targeted_open.log + targeted_am.log + empty targeted_actuation.log"
+  row targeted_open gate executed "targeted_open.log + 01d_palgate_gates_tap.png + empty targeted_actuation.log"
 elif [ -s "$ART/targeted_actuation.log" ]; then
   gate_block "targeted open caused actuation: $(head -2 "$ART/targeted_actuation.log")"; row targeted_open gate fail "targeted_actuation.log"
 else
-  gate_block "targeted open did not reach SYNTHETIC-DISPATCH: am=$(cat "$ART/targeted_am.log" | head -3) logcat=$(grep -iE 'palgate|AndroidRuntime|Service' "$ART/targeted_open.log" | tail -4)"
-  row targeted_open gate fail "targeted_open.log + targeted_am.log"
+  gate_block "targeted open did not reach SYNTHETIC-DISPATCH: logcat=$(grep -iE 'palgate|AndroidRuntime|Service' "$ART/targeted_open.log" | tail -4)"
+  row targeted_open gate fail "targeted_open.log + 01d_palgate_gates_tap.png"
 fi
 adb logcat -c || true
 
@@ -150,6 +160,27 @@ if [ -f widgethost/WidgetHostTest.apk ]; then
 else
   gate_block "WidgetHostTest.apk missing (build step)"; row widgethost gate fail "apk missing"
 fi
+
+echo "-- gate: media-session custom action probe (mechanism, no audio) --"
+# Proves the media-style button mechanism: a MediaSession custom action in
+# STATE_PAUSED (nothing playing) reaches the app callback via MediaController
+# dispatch - the same dispatch an AA host performs on tap. Does NOT prove AA
+# displays the card/controls without audio (host behavior, needs a real host).
+adb logcat -c || true
+adb shell am start -n com.palgate.widgethost/.MediaProbeActivity >/dev/null 2>&1
+sleep 7
+adb logcat -d -s PalGateMedia:I > "$ART/media_probe.log" 2>/dev/null || true
+adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/media_actuation.log" 2>/dev/null || true
+shot 21_media_probe
+if grep -q "MEDIA-PROBE onCustomAction reached" "$ART/media_probe.log" && [ ! -s "$ART/media_actuation.log" ]; then
+  note "media custom action reached app callback with no audio, zero actuation attempts"
+  row media_custom_action gate executed "media_probe.log + 21_media_probe.png + empty media_actuation.log"
+elif [ -s "$ART/media_actuation.log" ]; then
+  gate_block "media probe caused actuation: $(head -2 "$ART/media_actuation.log")"; row media_custom_action gate fail "media_actuation.log"
+else
+  gate_block "media custom action did not reach callback: $(tail -3 "$ART/media_probe.log")"; row media_custom_action gate fail "media_probe.log"
+fi
+adb logcat -c || true
 
 echo "-- gate: gearhead present --"
 if adb shell pm list packages | grep -q gearhead; then
@@ -282,6 +313,9 @@ echo "-- optional: Open Headunit self-mode (experimental) --"
 # match on "Allow" would hit "Don't allow". Granting up front skips it.
 adb shell pm grant com.andrerinas.headunitrevived android.permission.ACCESS_FINE_LOCATION >/dev/null 2>&1 || true
 adb shell pm grant com.andrerinas.headunitrevived android.permission.ACCESS_COARSE_LOCATION >/dev/null 2>&1 || true
+adb shell pm grant com.andrerinas.headunitrevived android.permission.NEARBY_WIFI_DEVICES >/dev/null 2>&1 || true
+adb shell pm grant com.andrerinas.headunitrevived android.permission.BLUETOOTH_CONNECT >/dev/null 2>&1 || true
+adb shell pm grant com.andrerinas.headunitrevived android.permission.BLUETOOTH_SCAN >/dev/null 2>&1 || true
 adb shell monkey -p com.andrerinas.headunitrevived -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
 sleep 8; shot 30_openheadunit
 # first-run wizard ("Welcome to Open Headunit"): skip setup to reach the main
