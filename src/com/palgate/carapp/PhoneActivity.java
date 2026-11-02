@@ -134,7 +134,7 @@ public class PhoneActivity extends Activity implements State.Listener {
         TextView sub = new TextView(this);
         sub.setText("Opens via the official PalGate app's widget command (network), "
                 + "or direct BLE with the cached key. No server of ours, no login of ours.\n"
-                + "v1.3: auto-open starts OFF — test detection first. Walk-up needs no car connection. Radio trigger fires only for a bound gate radio.");
+                + "v1.4: auto-open starts OFF — test detection first. Walk-up needs no car connection. Radio trigger fires only for a bound gate radio.");
         sub.setPadding(0, dp(2), 0, dp(10));
         root.addView(sub);
 
