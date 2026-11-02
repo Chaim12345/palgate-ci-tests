@@ -1,0 +1,32 @@
+name: redroid-capability-probe
+# One bounded, read-only host capability probe for the user's redroid/native-ARM
+# question: does GitHub's ubuntu-24.04-arm runner kernel offer binder/binderfs
+# (required by redroid containers)? No checkout, no secrets, no untrusted code,
+# no persistent changes (throwaway runner). Container AOSP is never stock
+# Android Auto / GMS proof regardless of outcome.
+on: [push]
+jobs:
+  probe:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Probe ARM host kernel capabilities for redroid
+        run: |
+          echo "== arch/kernel =="
+          uname -m; uname -r
+          echo "== binder/ashmem in kernel config =="
+          (zcat /proc/config.gz 2>/dev/null || cat /boot/config-$(uname -r) 2>/dev/null) | grep -E 'CONFIG_ANDROID_BINDERFS|CONFIG_ANDROID_BINDER_IPC|CONFIG_ASHMEM|CONFIG_MEMFD' || echo "no readable kernel config"
+          echo "== prebuilt android driver modules =="
+          ls /lib/modules/$(uname -r)/kernel/drivers/android/ 2>/dev/null || echo "no drivers/android module dir"
+          echo "== binderfs filesystem support =="
+          grep -w binder /proc/filesystems || echo "binderfs NOT in /proc/filesystems"
+          echo "== modprobe attempt (ephemeral runner, reviewed safe) =="
+          if sudo modprobe binder_linux devices=binder,hwbinder,vndbinder 2>/tmp/modprobe.err; then echo MODPROBE_OK; else echo "MODPROBE_FAIL: $(cat /tmp/modprobe.err)"; fi
+          lsmod | grep -E 'binder|ashmem' || echo "no binder/ashmem modules loaded"
+          echo "== binder device nodes =="
+          ls -la /dev/binderfs /dev/binder 2>/dev/null || echo "no binder device nodes"
+          echo "== docker availability (redroid runs privileged docker) =="
+          docker version --format 'server {{.Server.Version}}' 2>/dev/null || echo "no docker daemon"
+          echo "== resources =="
+          nproc; free -h | head -2
+          echo "== kvm (for comparison; redroid does NOT need it) =="
+          ls /dev/kvm 2>/dev/null || echo "no /dev/kvm"

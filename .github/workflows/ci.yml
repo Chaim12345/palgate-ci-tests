@@ -123,16 +123,23 @@ jobs:
         run: |
           # AARE needs compileSdk 37; the runner's bundled cmdline-tools may be
           # too old to know it, so refresh cmdline-tools first, then install.
-          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          "$SM" --install "cmdline-tools;latest" --sdk_root="$ANDROID_HOME" >/dev/null
-          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          SM0="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SM0" --install "cmdline-tools;latest" --sdk_root="$ANDROID_HOME" >/dev/null
+          # The refresh lands in cmdline-tools/latest-2 when 'latest' is in
+          # use; resolve the freshest sdkmanager before installing packages.
+          SM=$(ls -d "$ANDROID_HOME"/cmdline-tools/latest*/bin/sdkmanager | sort -V | tail -1)
+          echo "sdkmanager: $SM"
           yes | "$SM" --licenses >/dev/null || true
           ls "$ANDROID_HOME/platforms" || true
           # AARE pins no buildToolsVersion: install the newest available so
           # AGP's default resolves, instead of guessing a revision per boot.
           BT=$("$SM" --list | grep -oE 'build-tools;[0-9.]+' | sort -t';' -k2 -V | tail -1)
           echo "newest build-tools: $BT"
-          "$SM" "platforms;android-34" "platforms;android-37" "$BT" "platform-tools" "emulator"
+          "$SM" "platforms;android-34" "$BT" "platform-tools" "emulator"
+          # API 37 is preview-only: no stable platforms;android-37 package
+          # exists (stable manifest tops out at android-36). The canary
+          # channel carries platforms;android-37.x minor releases.
+          yes | "$SM" --channel=3 "platforms;android-37.2"
 
       - name: Clone AARE at pinned reviewed revision
         run: |
