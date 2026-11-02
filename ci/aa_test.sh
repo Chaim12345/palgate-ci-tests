@@ -127,6 +127,25 @@ else
   gate_block "WidgetHostTest.apk missing (build step)"; row widgethost gate fail "apk missing"
 fi
 
+echo "-- gate: targeted per-gate open dispatch (car-grid intent path) --"
+# The car grid and per-gate phone taps send ACTION_OPEN_NOW with a gateId extra.
+# Drive that exact path from the shell and require the test-build choke point
+# (SYNTHETIC-DISPATCH) - NOT a refusal - with zero actuation attempts.
+adb logcat -c || true
+adb shell am startservice -n com.palgate.carapp/.GateMonitorService -a com.palgate.carapp.OPEN_NOW --es gateId TEST000001 >/dev/null 2>&1
+sleep 5
+adb logcat -d -s PalGate:I > "$ART/targeted_open.log" 2>/dev/null || true
+adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/targeted_actuation.log" 2>/dev/null || true
+if grep -q 'SYNTHETIC-DISPATCH manual open requested' "$ART/targeted_open.log" && ! grep -q 'OPEN-REFUSED' "$ART/targeted_open.log" && [ ! -s "$ART/targeted_actuation.log" ]; then
+  note "targeted gateId open reached the test-build choke point (SYNTHETIC-DISPATCH), no refusal, zero actuation attempts"
+  row targeted_open gate executed "targeted_open.log + empty targeted_actuation.log"
+elif [ -s "$ART/targeted_actuation.log" ]; then
+  gate_block "targeted open caused actuation: $(head -2 "$ART/targeted_actuation.log")"; row targeted_open gate fail "targeted_actuation.log"
+else
+  gate_block "targeted open did not reach SYNTHETIC-DISPATCH: $(tail -3 "$ART/targeted_open.log")"; row targeted_open gate fail "targeted_open.log"
+fi
+adb logcat -c || true
+
 echo "-- gate: gearhead present --"
 if adb shell pm list packages | grep -q gearhead; then
   GHVER=$(adb -s "$SER" shell dumpsys package com.google.android.projection.gearhead 2>/dev/null | grep -m1 versionName | tr -d '\r' | awk -F= '{print $2}')
