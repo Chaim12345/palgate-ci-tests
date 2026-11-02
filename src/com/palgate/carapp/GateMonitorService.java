@@ -162,7 +162,12 @@ public class GateMonitorService extends Service {
                 stopSelf();
                 return START_NOT_STICKY;
             }
-            startListening();
+            if (!startListening()) {
+                // Initialization failed (no LocationManager or no gates):
+                // startListening already logged the reason and stopped the
+                // service - terminal, and never dispatch after a stop.
+                return START_NOT_STICKY;
+            }
         }
         if (ACTION_OPEN_NOW.equals(action)) {
             // Reached only with a live, promoted foreground service: safe to
@@ -251,11 +256,12 @@ public class GateMonitorService extends Service {
 
     // ----------------------------------------------------------- monitoring --
 
-    private void startListening() {
+    /** Returns false when initialization failed and the service is stopping. */
+    private boolean startListening() {
         if (lm == null || gates.isEmpty()) {
             State.get().log("monitor: no LocationManager or no gates — stopping");
             stopSelf();
-            return;
+            return false;
         }
         listening = true;
         State.get().post(new Runnable() {
@@ -295,6 +301,7 @@ public class GateMonitorService extends Service {
                 + (fusedAvailable ? ", fused provider" : "")
                 + (State.get().testMode ? " [TEST MODE]" : ""));
         GateWidgetProvider.push(this);
+        return true;
     }
 
     /** (Re)request location streams with the current tier's intervals. */

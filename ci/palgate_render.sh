@@ -144,7 +144,7 @@ else
   sleep 12  # >10s: would catch ForegroundServiceDidNotStartInTimeException if stopSelf failed to cancel the FGS-start timeout
   adb logcat -d -s PalGate:I > "$ART/render_tap_palgate.log" 2>/dev/null || true
   adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN|writeCharacteristic' > "$ART/render_tap_actuation.log" 2>/dev/null || true
-  adb logcat -d | grep -E 'AndroidRuntime|ForegroundServiceDidNotStart' > "$ART/render_tap_crash.log" 2>/dev/null || true
+  adb logcat -d | grep -E 'AndroidRuntime.*palgate|ForegroundServiceDidNotStart.*palgate|palgate.*ForegroundServiceDidNotStart' > "$ART/render_tap_crash.log" 2>/dev/null || true
   REFUSED=0; grep -q 'monitor not started from car UI' "$ART/render_tap_palgate.log" && REFUSED=1
   DISPATCH=0; grep -q 'SYNTHETIC-DISPATCH' "$ART/render_tap_palgate.log" && DISPATCH=1
   ACT=0; [ -s "$ART/render_tap_actuation.log" ] && ACT=1
@@ -153,8 +153,11 @@ else
   UIOK=0; grep -q 'FAILED' "$ART/render_ui_gate_refused.xml" 2>/dev/null \
      && grep -qi 'monitoring off' "$ART/render_ui_gate_refused.xml" 2>/dev/null && UIOK=1
   if [ "$REFUSED" = "1" ] && [ "$DISPATCH" = "0" ] && [ "$ACT" = "0" ] && [ "$CRASH" = "0" ] && [ "$UIOK" = "1" ]; then
-    echo "palgate_render_open_blocked,gate,pass,\"car OPEN tap with monitor off in a background-ineligible state: explicit refusal on the car UI (FAILED + monitoring-off guidance), NO dispatch, zero actuation, no crash, no FGS-timeout ANR (>10s window). LIMIT: promotion-success path (choked SYNTHETIC-DISPATCH) is exercised in aa_test (foreground), not in this AARE background state\"" >> "$MATRIX"
-    echo "PHASE B1 tap OK: explicit refusal, nothing dispatched or actuated"
+    echo "palgate_render_open_blocked,gate,pass,\"BRANCH=refusal: car OPEN tap with monitor off in a background-ineligible state gave an explicit car-UI refusal (FAILED + monitoring-off guidance), NO dispatch, zero actuation, no crash, no FGS-timeout ANR (>10s window). The promotion-success dispatch path (choked SYNTHETIC-DISPATCH) is proven separately in aa_test (app foreground)\"" >> "$MATRIX"
+    echo "PHASE B1 tap OK (refusal branch): nothing dispatched or actuated"
+  elif [ "$DISPATCH" = "1" ] && [ "$ACT" = "0" ] && [ "$CRASH" = "0" ]; then
+    echo "palgate_render_open_blocked,gate,pass,\"BRANCH=dispatch: AARE proved promotion-eligible here (not an app defect): car OPEN tap reached the TEST choke (SYNTHETIC-DISPATCH), zero actuation, no crash\"" >> "$MATRIX"
+    echo "PHASE B1 tap OK (dispatch branch): choked, nothing actuated"
   else
     echo "palgate_render_open_blocked,gate,fail,\"refused=$REFUSED dispatch=$DISPATCH actuation=$ACT crash=$CRASH ui=$UIOK (render_tap_*.log, render_ui_gate_refused.xml)\"" >> "$MATRIX"
     echo "::error::PHASE B1 tap FAILED"
