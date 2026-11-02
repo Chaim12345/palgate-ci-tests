@@ -218,8 +218,9 @@ PYSEED
 fi
 
 adb logcat -d -s PalGate:I > "$ART/render_palgate.log" 2>/dev/null || true
+adb logcat -d > "$ART/render_logcat_full.log" 2>/dev/null || true
 adb logcat -d | grep -iE 'carapp|CarApp|HostValidator|GateCar|GateGrid|palgate' > "$ART/render_carapp.log" 2>/dev/null || true
-mask_logs "$ART/render_palgate.log" "$ART/render_carapp.log" "$ART/render_tap_palgate.log" "$ART"/render_ui_*.xml
+mask_logs "$ART/render_palgate.log" "$ART/render_carapp.log" "$ART/render_tap_palgate.log" "$ART/render_logcat_full.log" "$ART"/render_ui_*.xml
 
 cat "$MATRIX"
 [ "$FAIL" = "0" ] && echo "RENDER PROOFS OK (AARE local preview; third-party host, NOT stock AA)" || exit 1

@@ -15,10 +15,17 @@ CP = os.path.join(HERE, "cp")
 
 
 def prune_non_classes(root):
-    """d8 only wants .class files: drop META-INF, module-info, kotlin metadata."""
+    """d8 only wants .class files: drop META-INF, module-info, kotlin metadata.
+    EXCEPTION: AAR classes.jars can carry runtime classpath resources at their
+    ROOT (e.g. androidx.car.app's car-app-api.level, read via
+    ClassLoader.getResourceAsStream during the host handshake). Root-level
+    files are preserved; build.sh packages them into the APK root."""
     for dirpath, dirnames, filenames in os.walk(root, topdown=False):
         for f in filenames:
             if not f.endswith(".class"):
+                if os.path.abspath(dirpath) == os.path.abspath(root):
+                    print(f"   preserving root-level classpath resource: {f}")
+                    continue
                 os.remove(os.path.join(dirpath, f))
         for d in list(dirnames):
             full = os.path.join(dirpath, d)

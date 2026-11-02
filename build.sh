@@ -60,14 +60,37 @@ fi
 echo "== 1/6 aapt2 compile resources =="
 "$BT/aapt2" compile --dir "$SRC/res" -o "$OUT/compiled-res"
 
+echo "== 1b/6 aapt2 compile library resources (R-class merge) =="
+# Merged library code references its own R classes (verified by class scan:
+# androidx.car.app, androidx.core, androidx.media, androidx.lifecycle.runtime,
+# androidx.lifecycle.viewmodel, androidx.savedstate). AARs ship no R bytecode
+# and our dex had none: androidx.car.app's handshake (AppInfo /
+# car_app_library_version) and ConstraintManager (content_limit_grid) crashed
+# with NoClassDefFoundError on first host bind. Compile each AAR's res/ and
+# link them in with --extra-packages so real R classes are generated.
+AAR_RES_PKGS="androidx.car.app:app-1.4.0 androidx.core:core-1.7.0 androidx.media:media-1.6.0 androidx.lifecycle.runtime:lifecycle-runtime-2.3.1 androidx.lifecycle.viewmodel:lifecycle-viewmodel-2.3.0 androidx.savedstate:savedstate-1.1.0"
+EXTRA_PKGS=""
+mkdir -p "$OUT/compiled-res-aar"
+for pair in $AAR_RES_PKGS; do
+  pkg="${pair%%:*}"; art="${pair##*:}"
+  rm -rf "$OUT/aar-res-$art"
+  mkdir -p "$OUT/aar-res-$art"
+  (cd "$OUT/aar-res-$art" && unzip -qo "$SRC/aars/$art.aar" 'res/*')
+  # -o must be a pre-existing directory or aapt2 writes a single flat-zip FILE
+  mkdir -p "$OUT/compiled-res-aar/$art"
+  "$BT/aapt2" compile --dir "$OUT/aar-res-$art/res" -o "$OUT/compiled-res-aar/$art"
+  EXTRA_PKGS="${EXTRA_PKGS:+$EXTRA_PKGS:}$pkg"
+done
+
 echo "== 2/6 aapt2 link (base APK + R.java) =="
-mapfile -t FLATS < <(find "$OUT/compiled-res" -name '*.flat' | sort)
+mapfile -t FLATS < <(find "$OUT/compiled-res" "$OUT/compiled-res-aar" -name '*.flat' | sort)
 "$BT/aapt2" link -I "$PLAT" \
   --manifest "$MANIFEST" \
   --min-sdk-version 23 --target-sdk-version 34 \
   --version-code 5 --version-name 1.4 \
   -A "$SRC/assets" \
   --java "$OUT/gen" \
+  --extra-packages "$EXTRA_PKGS" \
   -o "$OUT/base.apk" \
   "${FLATS[@]}"
 
@@ -79,13 +102,16 @@ java -jar "$ECJ" -source 8 -target 8 -encoding UTF-8 -nowarn \
 
 echo "== 4/6 d8 dex (app + androidx.car.app + deps) =="
 (cd "$OUT/classes" && zip -q -r "$OUT/app.jar" .)
-(cd "$SRC/cp" && zip -q -r "$OUT/cp.jar" .)
+# car-app-api.level is a classpath resource, not dex input: exclude from the
+# jar, package into the APK root at step 5 (ClassLoader.getResourceAsStream).
+(cd "$SRC/cp" && zip -q -r "$OUT/cp.jar" . -x 'car-app-api.level')
 "$BT/d8" --release --lib "$PLAT" --min-api 23 \
   --output "$OUT/dex" \
   "$OUT/app.jar" "$OUT/cp.jar"
 
 echo "== 5/6 package =="
 (cd "$OUT/dex" && zip -q -j "$OUT/base.apk" classes.dex)
+[ -f "$SRC/cp/car-app-api.level" ] && (cd "$SRC/cp" && zip -q "$OUT/base.apk" car-app-api.level)
 "$BT/zipalign" -f 4 "$OUT/base.apk" "$OUT/aligned.apk"
 
 echo "== 6/6 sign =="
@@ -101,11 +127,48 @@ fi
 "$BT/apksigner" verify --print-certs "$SRC/PalGateCar.apk" | head -2
 
 echo "== manifest/resource assertions (review fixes) =="
+[ -f "$OUT/classes/androidx/car/app/R\$string.class" ] \
+  || { echo "FAIL: androidx.car.app.R classes were not generated/compiled"; exit 1; }
+echo "ok: androidx.car.app.R generated and compiled into dex input"
+unzip -l "$OUT/base.apk" | grep -q 'car-app-api.level' \
+  || { echo "FAIL: car-app-api.level classpath resource missing from APK root"; exit 1; }
+echo "ok: car-app-api.level packaged at APK root"
+# dump-to-file: a pipe to grep -q is SIGPIPE-racy under pipefail
+"$BT/aapt2" dump resources "$SRC/PalGateCar.apk" > "$OUT/resources.txt"
+grep -q 'car_app_library_version' "$OUT/resources.txt" \
+  || { echo "FAIL: androidx.car.app resources not merged"; exit 1; }
+echo "ok: androidx.car.app resources merged"
+
+echo "== identity + collision assertions (values, not just presence) =="
+# car-app-api.level in the APK must be byte-identical to the AAR's entry
+python3 - "$SRC/aars/app-1.4.0.aar" "$OUT/base.apk" <<'PYID'
+import sys, zipfile, hashlib
+aar, apk = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(aar) as z, z.open('classes.jar') as cjf:
+    import io
+    cj = zipfile.ZipFile(io.BytesIO(cjf.read()))
+    want = hashlib.sha256(cj.read('car-app-api.level')).hexdigest()
+got = hashlib.sha256(zipfile.ZipFile(apk).read('car-app-api.level')).hexdigest()
+if want != got:
+    print("FAIL: car-app-api.level content differs from AAR"); sys.exit(1)
+print("ok: car-app-api.level byte-identical to AAR entry")
+PYID
+grep -A1 'string/car_app_library_version' "$OUT/resources.txt" | grep -q '"1.4.0"' \
+  || { echo "FAIL: car_app_library_version != 1.4.0"; exit 1; }
+grep -A1 'integer/content_limit_grid' "$OUT/resources.txt" | grep -qE '^\s+\(\) 6$' \
+  || { echo "FAIL: content_limit_grid != 6"; exit 1; }
+echo "ok: library resource VALUES verified (library 1.4.0, grid limit 6)"
+# merge must not have shadowed our own resources
+grep -A1 'color/widget_bg$' "$OUT/resources.txt" | grep -q '#fff4f8fc' \
+  || { echo "FAIL: own widget_bg color shadowed by merge"; exit 1; }
+grep -A1 'array/hosts_allowlist' "$OUT/resources.txt" | grep -q 'size=6' \
+  || { echo "FAIL: hosts_allowlist altered by merge"; exit 1; }
+echo "ok: own resources intact after library merge (no collisions/shadowing)"
 "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$SRC/PalGateCar.apk" > "$OUT/manifest.txt"
 grep -A1 'androidx.car.app.minCarApiLevel' "$OUT/manifest.txt" | grep -qE '=1$|0x1$' \
   || { echo "FAIL: androidx.car.app.minCarApiLevel=1 metadata missing from APK"; exit 1; }
 echo "ok: minCarApiLevel=1 present in built APK"
-"$BT/aapt2" dump resources "$SRC/PalGateCar.apk" | grep -q 'hosts_allowlist' \
+grep -q 'hosts_allowlist' "$OUT/resources.txt" \
   || { echo "FAIL: hosts_allowlist array missing from APK resources"; exit 1; }
 echo "ok: hosts_allowlist resource present in built APK"
 

@@ -54,6 +54,14 @@
             </intent-filter>
         </service>
 
+        <!-- androidx.car.app library components (normally manifest-merged from
+             the AAR; our hand-rolled build must declare them itself) -->
+        <activity android:name="androidx.car.app.CarAppPermissionActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+        <receiver android:name="androidx.car.app.notification.CarAppNotificationBroadcastReceiver"
+            android:exported="false"/>
+
         <!-- driving monitor: geofence + condition gates + BLE auto-open -->
         <service android:name=".GateMonitorService" android:exported="false"
             android:foregroundServiceType="location"/>
