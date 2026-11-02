@@ -78,7 +78,6 @@ jobs:
           docker run -d --name redroid --privileged \
             -v /dev/binderfs:/dev/binderfs \
             -p 5555:5555 \
-            --memory 4g --cpus 2 \
             "$REDROID_IMAGE" \
             androidboot.redroid_gpu_mode=guest \
             androidboot.redroid_width=720 androidboot.redroid_height=1280 androidboot.redroid_dpi=320
@@ -104,6 +103,9 @@ jobs:
               echo "== docker logs =="; docker logs redroid 2>&1 | tail -40
               echo "== getprop sample =="; adb -s localhost:5555 shell getprop 2>&1 | head -30
               echo "== processes =="; adb -s localhost:5555 shell ps -A 2>&1 | head -30
+              echo "== crash buffer =="; adb -s localhost:5555 logcat -d -b crash 2>&1 | tail -60
+              echo "== key services =="; adb -s localhost:5555 shell 'getprop | grep -E "init.svc.(zygote|surfaceflinger|system)|sys.boot_completed|ro.product.cpu.abi|ro.build.version.release"' 2>&1
+              echo "== fatal lines =="; adb -s localhost:5555 logcat -d 2>&1 | grep -iE 'FATAL|Watchdog|system_server|SurfaceFlinger|zygote|lowmemorykiller|sigsegv|sigabrt' | tail -40
               echo "== logcat tail =="; adb -s localhost:5555 logcat -d -b all 2>&1 | tail -80
               echo "== dmesg tail =="; adb -s localhost:5555 shell dmesg 2>&1 | tail -40
             } > artifacts/boot_diag.txt 2>&1 || true
