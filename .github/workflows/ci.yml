@@ -1,6 +1,10 @@
 name: palgate-ci
 on:
   push:
+    # Probe-only changes must not retrigger the whole pipeline.
+    paths-ignore:
+      - '.github/workflows/redroid-probe.yml'
+
     # Full emulator + DHU run only when app/projection-relevant files change.
     # Synthetic fixture (assets/) and CI-script-only updates are covered by
     # the fast fixtures-kat workflow instead.
