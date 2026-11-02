@@ -171,6 +171,22 @@ while IFS= read -r mac; do
   sed -i "s/$mac/[mac-local]/g" "$ART/aare_hu.log" "$ART/aare_actuation.log" "$ART/aare_phone.log" "$ART/aare_phone_full.log" "$ART/surfaceflinger_mid.txt" "$ART/surfaceflinger_late.txt" 2>/dev/null || true
 done < /tmp/local_macs.txt
 
+# Harness-correctness gate: a lane where no encode was ever ATTEMPTED (HU
+# never launched, never connected, or the encoder never configured) is an
+# invalid run, not a codec verdict - fail the job so it can never read as
+# acceptance-green. Artifacts are already collected + masked above, and the
+# workflow's scan/upload steps run if:always(), so evidence is preserved.
+ATTEMPT=0
+grep -qsiE 'video started|codec|CCodec|GraphicBufferSource|MediaCodec|encoder|session started' "$ART/aare_hu.log" "$ART/aare_phone.log" 2>/dev/null && ATTEMPT=1
+ls "$ART"/ffstdin.*.h264 >/dev/null 2>&1 && ATTEMPT=1
+ls "$ART"/aare/*.png >/dev/null 2>&1 && ATTEMPT=1
+if [ "$ATTEMPT" = "0" ]; then
+  echo "aare_host,gate,fail,\"no encode attempt: HU never launched/connected or encoder never configured - invalid run (aare_hu.log)\"" >> "$MATRIX"
+  echo "::error::AARE lane INVALID: no encode attempt (harness/environment failure, not a codec verdict)"
+  cat "$MATRIX"
+  exit 1
+fi
+
 PNG=$(ls "$ART"/aare/*.png 2>/dev/null | head -1)
 if [ -n "$PNG" ] && [ ! -s "$ART/aare_actuation.log" ]; then
   echo "[optional] AARE head unit rendered frames: $(ls "$ART"/aare/*.png | wc -l) snapshot(s) (third-party CAL host, not stock AA)"
