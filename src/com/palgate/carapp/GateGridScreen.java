@@ -88,16 +88,18 @@ public class GateGridScreen extends Screen implements State.Listener {
                     .build());
             budget--;
         }
-        if (gates.isEmpty()) {
+        if (gates.isEmpty() && budget > 0) {
+            // (budget == 0: pathological host limit 1 with the status card
+            // taking the only slot - a second card would reject the template)
             list.addItem(new GridItem.Builder()
                     .setTitle("No gates configured")
                     .setText("Add gates in the app")
                     .setImage(icon(), GridItem.IMAGE_TYPE_ICON)
                     .build());
-        } else {
+        } else if (!gates.isEmpty()) {
             List<Gate> show = applySessionOrder(gates, s);
             int more = 0;
-            if (show.size() > budget) {
+            if (budget > 0 && show.size() > budget) {
                 // Hosts reject the whole template above the content limit,
                 // and a title disclosure ellipsizes away. Disclose the cap
                 // as a visible trailing card instead; the full list stays
@@ -105,6 +107,11 @@ public class GateGridScreen extends Screen implements State.Listener {
                 int keep = Math.max(budget - 1, 0);
                 more = show.size() - keep;
                 show = new ArrayList<>(show.subList(0, keep));
+            } else if (budget <= 0) {
+                // Pathological host limit (1) with the status card taking the
+                // only slot: show the status card ALONE - a "+N more" card
+                // here would overflow the limit and reject the template.
+                show = new ArrayList<>();
             }
             for (final Gate g : show) {
                 list.addItem(new GridItem.Builder()
