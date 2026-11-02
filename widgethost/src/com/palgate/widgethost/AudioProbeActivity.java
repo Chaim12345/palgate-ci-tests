@@ -44,6 +44,8 @@ public class AudioProbeActivity extends Activity {
         status.setText("audio probe: starting");
         setContentView(status);
 
+        final boolean nofocus = getIntent().getBooleanExtra("nofocus", false);
+        final String pfx = nofocus ? "MEDIA-PROBE(audio-nofocus) " : "MEDIA-PROBE(audio) ";
         final AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
         AudioManager.OnAudioFocusChangeListener focusListener =
                 new AudioManager.OnAudioFocusChangeListener() {
@@ -56,15 +58,24 @@ public class AudioProbeActivity extends Activity {
         session.setCallback(new MediaSession.Callback() {
             @Override public void onCustomAction(String action, Bundle extras) {
                 reached = true;
-                Log.i(TAG, "MEDIA-PROBE(audio) onCustomAction reached action=" + action);
+                Log.i(TAG, pfx + "onCustomAction reached action=" + action);
                 set("MEDIA-PROBE(audio): onCustomAction reached");
             }
         });
 
-        int focus = am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
-        Log.i(TAG, "MEDIA-PROBE(audio) focus request (TRANSIENT_MAY_DUCK) result=" + focus
-                + (focus == AudioManager.AUDIOFOCUS_REQUEST_GRANTED ? " GRANTED" : " NOT-GRANTED"));
+        int focus = AudioManager.AUDIOFOCUS_REQUEST_FAILED;
+        if (!nofocus) {
+            focus = am.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
+            Log.i(TAG, pfx + "focus request (TRANSIENT_MAY_DUCK) result=" + focus
+                    + (focus == AudioManager.AUDIOFOCUS_REQUEST_GRANTED ? " GRANTED" : " NOT-GRANTED"));
+        } else {
+            // Accuracy check: playback WITHOUT a focus request. The platform does
+            // not force an app to request audio focus; a proper media app does so
+            // on play. Whether AA treats a no-focus session as active media is a
+            // host question this probe cannot answer.
+            Log.i(TAG, pfx + "playing WITHOUT audio focus request (platform permits; not a proper-citizen route)");
+        }
 
         // Digital silence: zero-filled PCM, STREAM_MUSIC, ~3 seconds.
         final int rate = 44100;
@@ -86,7 +97,7 @@ public class AudioProbeActivity extends Activity {
                 while (System.currentTimeMillis() < end) track.write(silence, 0, silence.length);
             }
         }).start();
-        Log.i(TAG, "MEDIA-PROBE(audio) silent PCM playing on STREAM_MUSIC (inaudible, focus still held)");
+        Log.i(TAG, pfx + "silent PCM playing on STREAM_MUSIC (inaudible" + (nofocus ? ", no focus held)" : ", focus held)"));
 
         session.setPlaybackState(new PlaybackState.Builder()
                 .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
@@ -95,23 +106,22 @@ public class AudioProbeActivity extends Activity {
                         ACTION_OPEN, "Open Gate", R.drawable.ic_probe_gate).build())
                 .build());
         session.setActive(true);
-        Log.i(TAG, "MEDIA-PROBE(audio) session PLAYING with custom action published");
+        Log.i(TAG, pfx + "session PLAYING with custom action published");
 
         final MediaController controller =
                 new MediaController(this, session.getSessionToken());
         new Handler().postDelayed(new Runnable() {
             @Override public void run() {
                 controller.getTransportControls().sendCustomAction(ACTION_OPEN, null);
-                Log.i(TAG, "MEDIA-PROBE(audio) custom action dispatched while PLAYING");
+                Log.i(TAG, pfx + "custom action dispatched while PLAYING");
             }
         }, 1500);
 
         new Handler().postDelayed(new Runnable() {
             @Override public void run() {
                 track.stop(); track.release();
-                am.abandonAudioFocus(focusListener);
-                Log.i(TAG, "MEDIA-PROBE(audio) focus released after 3s; reached=" + reached
-                        + (reached ? "" : " TIMEOUT"));
+                if (!nofocus) am.abandonAudioFocus(focusListener);
+                Log.i(TAG, pfx + "finished; reached=" + reached + (reached ? "" : " TIMEOUT"));
                 if (!reached) set("MEDIA-PROBE(audio): TIMEOUT");
             }
         }, 4000);

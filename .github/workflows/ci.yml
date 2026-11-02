@@ -11,6 +11,7 @@ on:
       - 'AndroidManifest.xml'
       - 'build.sh'
       - 'ci/aa_test.sh'
+      - 'ci/aare_test.sh'
       - 'fetch_deps.py'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
@@ -47,10 +48,10 @@ jobs:
           python3 extract_cp.py
           ./build.sh
 
-      - name: Upload built APK
+      - name: Upload built APK (TEST BUILD - actuation disabled, never for production delivery)
         uses: actions/upload-artifact@v4
         with:
-          name: PalGateCar-apk
+          name: PalGateCar-TEST-no-actuation
           path: PalGateCar.apk
 
       - name: Build WidgetHostTest.apk (widget hosted-render harness)
@@ -95,3 +96,74 @@ jobs:
           name: aa-widget-artifacts
           path: artifacts/
           if-no-files-found: warn
+
+  # Third-party CAL host lane: AARE (pinned rev, public, GPLv3). NOT stock AA
+  # proof - AARE and Google's stack reject each other's certificates both
+  # directions, so this can never substitute for a gearhead projection pass.
+  # Isolation: contents:read token, no secrets, no private fixtures; AARE is
+  # cloned from its public repo at a pinned, reviewed commit.
+  aare-host-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: build-and-test
+    permissions:
+      contents: read
+    env:
+      AARE_REV: 74271014a4b8e94308e102f977ef180083001d10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install SDK components
+        run: |
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SM" --licenses >/dev/null || true
+          "$SM" "platforms;android-34" "platforms;android-37" "build-tools;34.0.0" "platform-tools" "emulator"
+
+      - name: Clone AARE at pinned reviewed revision
+        run: |
+          git clone https://github.com/prototux/AARE "$HOME/aare"
+          cd "$HOME/aare"
+          git checkout "$AARE_REV"
+          test "$(git rev-parse HEAD)" = "$AARE_REV"
+
+      - name: Build AARE debug APK + desktop head unit (pinned source)
+        run: cd "$HOME/aare" && ./gradlew --no-daemon :app:assembleDebug :headunit:installDist --console=plain -q
+
+      - name: Download PalGateCar TEST apk
+        uses: actions/download-artifact@v4
+        with:
+          name: PalGateCar-TEST-no-actuation
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run AARE host lane
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis_playstore
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 3072
+          script: AARE_DIR=$HOME/aare ./ci/aare_test.sh
+
+      - name: Scan artifact staging for secrets before upload
+        if: always()
+        run: |
+          if [ -d artifacts ]; then python3 ci/scan_secrets.py --dir artifacts; fi
+
+      - name: Upload AARE lane artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aare-host-artifacts
+          path: artifacts/
+          if-no-files-found: warn
+

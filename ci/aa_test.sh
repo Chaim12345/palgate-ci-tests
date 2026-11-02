@@ -187,11 +187,17 @@ echo "-- gate: simulated-audio media session probe (user proposal, isolated) --"
 adb logcat -c || true
 adb shell am start -n com.palgate.widgethost/.AudioProbeActivity >/dev/null 2>&1
 sleep 8
+adb shell am start -n com.palgate.widgethost/.AudioProbeActivity --ez nofocus true >/dev/null 2>&1
+sleep 8
 adb logcat -d -s PalGateMedia:I > "$ART/audio_probe.log" 2>/dev/null || true
 adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/audio_actuation.log" 2>/dev/null || true
 shot 22_audio_probe
-if grep -q "MEDIA-PROBE(audio) onCustomAction reached" "$ART/audio_probe.log"    && grep -q "focus request (TRANSIENT_MAY_DUCK) result=1 GRANTED" "$ART/audio_probe.log"    && [ ! -s "$ART/audio_actuation.log" ]; then
-  note "simulated-audio session: focus granted (MAY_DUCK), custom action dispatched while PLAYING, zero actuation"
+if grep -q "MEDIA-PROBE(audio) onCustomAction reached" "$ART/audio_probe.log" \
+   && grep -q "MEDIA-PROBE(audio-nofocus) onCustomAction reached" "$ART/audio_probe.log" \
+   && grep -q "focus request (TRANSIENT_MAY_DUCK) result=1 GRANTED" "$ART/audio_probe.log" \
+   && grep -q "playing WITHOUT audio focus request" "$ART/audio_probe.log" \
+   && [ ! -s "$ART/audio_actuation.log" ]; then
+  note "simulated-audio session: focus granted (MAY_DUCK) when requested; playback+callback also work WITHOUT focus request (platform permits it); zero actuation"
   row media_audio_focus gate executed "audio_probe.log + 22_audio_probe.png + empty audio_actuation.log"
 elif [ -s "$ART/audio_actuation.log" ]; then
   gate_block "audio probe caused actuation: $(head -2 "$ART/audio_actuation.log")"; row media_audio_focus gate fail "audio_actuation.log"
