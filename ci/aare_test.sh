@@ -41,14 +41,17 @@ echo "-- aare lane: headless head unit --"
 adb logcat -c || true
 
 # DIAGNOSTIC (temporary): wrap ffmpeg so its stdin (the phone's actual H.264
-# bytes) is captured per invocation. The decode failure gets full evidence
-# instead of guesswork. Removed once the render pipeline is green.
-if [ -x /usr/local/bin/ffmpeg ]; then
-  sudo mv /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg.real
-  printf '#!/bin/bash\ntee "$PWD/ffstdin.$$.h264" | /usr/local/bin/ffmpeg.real "$@"\n' | sudo tee /usr/local/bin/ffmpeg >/dev/null
-  sudo chmod +x /usr/local/bin/ffmpeg
-  ( cd "$ART" && touch .teedir ) # ensure dir exists
+# bytes) is captured per invocation. Only the decode invocation (-i pipe:0)
+# gets the tee; -version/-h checks exec the real binary directly (tee would
+# deadlock on the never-closed Java stdin pipe). Self-tested immediately.
+if [ -x /usr/local/bin/ffmpeg ] && [ ! -x /usr/local/bin/ffmpeg.real ]; then
+  sudo mv /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg.real || echo "MV FAILED"
 fi
+ls -la /usr/local/bin/ffmpeg* || true
+printf '#!/bin/bash\nfor a in "$@"; do\n  if [ "$a" = "pipe:0" ]; then\n    tee "$PWD/ffstdin.$$.h264" | /usr/local/bin/ffmpeg.real "$@"\n    exit $?\n  fi\ndone\nexec /usr/local/bin/ffmpeg.real "$@"\n' | sudo tee /usr/local/bin/ffmpeg >/dev/null
+sudo chmod +x /usr/local/bin/ffmpeg
+echo "wrapper content:"; cat /usr/local/bin/ffmpeg
+echo "wrapper self-test:"; ffmpeg -version | head -1; echo "self-test exit: $?"
 HU="$AARE_DIR/headunit/build/install/aare-headunit/bin/aare-headunit"
 timeout 240 "$HU" --serial "$ANDROID_SERIAL" --headless "$ART/aare" > "$ART/aare_hu.log" 2>&1 &
 HUPID=$!
