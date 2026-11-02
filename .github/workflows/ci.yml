@@ -165,12 +165,13 @@ jobs:
           # comments); Ubuntu 24.04's ffmpeg 6.1 fails on the primed pipe feed
           # with "Output file does not contain any stream" (locally reproduced:
           # exact AARE invocation works under 8.1, incl. SPS/PPS-primed feed).
-          # BtbN static build; URL is a rolling "latest" asset, so the hash
-          # (computed 2026-11-02 over the exact fetched bytes) is the pin.
-          curl -sSL -o /tmp/ffmpeg.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz"
-          echo "480af8f500784f3a4fd3054f24f1b93b54d752e50af040cd301e398e1d6a8cd3  /tmp/ffmpeg.tar.xz" | sha256sum -c -
+          # BtbN static build pinned to the immutable dated autobuild tag
+          # (the "latest" release rolls and broke the hash mid-investigation).
+          # Exact build verified locally against the AARE decoder invocation.
+          curl -sSL -o /tmp/ffmpeg.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-01-12-49/ffmpeg-n8.1.3-29-gad3b795b72-linux64-gpl-8.1.tar.xz"
+          echo "378639650544dfca48e2a3f7b4e5da2071ca1d91a59b7588bd188f7219ea2d7b  /tmp/ffmpeg.tar.xz" | sha256sum -c -
           tar -xJf /tmp/ffmpeg.tar.xz -C /tmp
-          sudo install -m 755 /tmp/ffmpeg-n8.1-latest-linux64-gpl-8.1/bin/ffmpeg /usr/local/bin/ffmpeg
+          sudo install -m 755 /tmp/ffmpeg-n8.1.3-29-gad3b795b72-linux64-gpl-8.1/bin/ffmpeg /usr/local/bin/ffmpeg
           ffmpeg -version | head -1
 
       - name: Enable KVM
