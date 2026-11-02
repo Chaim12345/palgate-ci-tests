@@ -12,6 +12,8 @@ on:
       - 'build.sh'
       - 'ci/aa_test.sh'
       - 'ci/aare_test.sh'
+      - 'ci/encoder_probe.sh'
+      - 'encoderprobe/**'
       - 'ci/synthetic_whitelist.txt'
       - 'fetch_deps.py'
       - '.github/workflows/ci.yml'
