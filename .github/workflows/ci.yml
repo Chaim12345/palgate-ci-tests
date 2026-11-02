@@ -106,9 +106,13 @@ jobs:
   # directions, so this can never substitute for a gearhead projection pass.
   # Isolation: contents:read token, no secrets, no private fixtures; AARE is
   # cloned from its public repo at a pinned, reviewed commit.
-  aare-host-test:
+  # Two-job split: the phone side runs in a pinned redroid Android 15 arm64
+  # container (Google emulator images wedge the AARE phone-side encoder on
+  # API 34 and API 36: zero encoded frames reach the head unit; redroid ships
+  # its own AOSP codec build, a genuinely different stack to test).
+  aare-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 25
     needs: build-and-test
     permissions:
       contents: read
@@ -128,20 +132,12 @@ jobs:
           # too old to know it, so refresh cmdline-tools first, then install.
           SM0="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "$SM0" --install "cmdline-tools;latest" --sdk_root="$ANDROID_HOME" >/dev/null
-          # The refresh lands in cmdline-tools/latest-2 when 'latest' is in
-          # use; resolve the freshest sdkmanager before installing packages.
           SM=$(ls -d "$ANDROID_HOME"/cmdline-tools/latest*/bin/sdkmanager | sort -V | tail -1)
           echo "sdkmanager: $SM"
           yes | "$SM" --licenses >/dev/null || true
-          ls "$ANDROID_HOME/platforms" || true
-          # AARE pins no buildToolsVersion: install the newest available so
-          # AGP's default resolves, instead of guessing a revision per boot.
           BT=$("$SM" --list | grep -oE 'build-tools;[0-9.]+' | sort -t';' -k2 -V | tail -1)
           echo "newest build-tools: $BT"
-          "$SM" "platforms;android-34" "$BT" "platform-tools" "emulator"
-          # API 37 is preview-only: no stable platforms;android-37 package
-          # exists (stable manifest tops out at android-36). The canary
-          # channel carries platforms;android-37.x minor releases.
+          "$SM" "platforms;android-34" "$BT" "platform-tools"
           yes | "$SM" --channel=3 "platforms;android-37.2"
 
       - name: Clone AARE at pinned reviewed revision
@@ -159,35 +155,109 @@ jobs:
         with:
           name: PalGateCar-TEST-no-actuation
 
-      - name: Install headunit runtime deps (ffmpeg 8 static, pinned + hash-verified)
+      - name: Stage + upload AARE build outputs
         run: |
-          # AARE's decoder invocation targets ffmpeg 8 behavior (DesktopMedia.kt
-          # comments); Ubuntu 24.04's ffmpeg 6.1 fails on the primed pipe feed
-          # with "Output file does not contain any stream" (locally reproduced:
-          # exact AARE invocation works under 8.1, incl. SPS/PPS-primed feed).
-          # BtbN static build pinned to the immutable dated autobuild tag
-          # (the "latest" release rolls and broke the hash mid-investigation).
-          # Exact build verified locally against the AARE decoder invocation.
-          curl -sSL -o /tmp/ffmpeg.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-01-12-49/ffmpeg-n8.1.3-29-gad3b795b72-linux64-gpl-8.1.tar.xz"
-          echo "378639650544dfca48e2a3f7b4e5da2071ca1d91a59b7588bd188f7219ea2d7b  /tmp/ffmpeg.tar.xz" | sha256sum -c -
+          mkdir -p stage/headunit
+          cp "$HOME/aare/app/build/outputs/apk/debug/app-debug.apk" stage/aare-app-debug.apk
+          cp PalGateCar.apk stage/PalGateCar.apk
+          cp -r "$HOME/aare/headunit/build/install/aare-headunit" stage/headunit/
+          sha256sum stage/aare-app-debug.apk stage/PalGateCar.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aare-build-artifacts
+          path: stage/
+          if-no-files-found: error
+
+  aare-host-arm:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 35
+    needs: aare-build
+    permissions:
+      contents: read
+    env:
+      # Same pinned redroid image as the proven boot probe: Android 15 arm64,
+      # dated immutable tag + digest. A redroid container is AOSP without GMS
+      # / gearhead: a pass here is an Android-15-container result only, never
+      # Android 16 / stock AA / GMS proof.
+      REDROID_IMAGE: redroid/redroid:15.0.0_64only-250627@sha256:dc2024a999dd0acb1112a23cddc9537ec8cb60a0dbe5a87ce9fbd75a2f5e94d2
+      ANDROID_SERIAL: localhost:5555
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Kernel binder setup (ephemeral runner)
+        run: |
+          sudo modprobe binder_linux devices=binder,hwbinder,vndbinder
+          sudo modprobe loop || true
+          sudo mkdir -p /dev/binderfs
+          sudo mount -t binder binder /dev/binderfs
+          ls -la /dev/binderfs/
+
+      - name: Pull pinned redroid image and validate config BEFORE privileged execution
+        run: |
+          docker pull "$REDROID_IMAGE"
+          docker image inspect "$REDROID_IMAGE" --format 'digests={{.RepoDigests}}'
+          EP=$(docker image inspect "$REDROID_IMAGE" --format '{{json .Config.Entrypoint}}{{json .Config.Cmd}}')
+          echo "entrypoint/cmd: $EP"
+          echo "$EP" | grep -q '/init' || { echo "UNEXPECTED image entrypoint - aborting"; exit 1; }
+
+      - name: Install native aarch64 adb client
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq adb || sudo apt-get install -y -qq android-tools-adb
+          adb version | head -1
+
+      - name: Download AARE build outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: aare-build-artifacts
+
+      - name: Install headunit runtime deps (ffmpeg 8 static arm64, pinned + hash-verified)
+        run: |
+          # Same immutable BtbN autobuild tag as the x86 lane, arm64 asset.
+          # sha256 computed locally over the full archive (size-verified).
+          curl -sSL -o /tmp/ffmpeg.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-01-12-49/ffmpeg-n8.1.3-29-gad3b795b72-linuxarm64-gpl-8.1.tar.xz"
+          echo "05a34a02b73083f9a1be7a7948e08a4d6c2477408a6a753790695bcd9b61abd7  /tmp/ffmpeg.tar.xz" | sha256sum -c -
           tar -xJf /tmp/ffmpeg.tar.xz -C /tmp
-          sudo install -m 755 /tmp/ffmpeg-n8.1.3-29-gad3b795b72-linux64-gpl-8.1/bin/ffmpeg /usr/local/bin/ffmpeg
+          sudo install -m 755 /tmp/ffmpeg-n8.1.3-29-gad3b795b72-linuxarm64-gpl-8.1/bin/ffmpeg /usr/local/bin/ffmpeg
           ffmpeg -version | head -1
 
-      - name: Enable KVM
+      - name: "Boot redroid container (bounded; proven recipe)"
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+          docker run -d --name redroid --privileged \
+            -v /dev/binderfs:/dev/binderfs \
+            -p 5555:5555 \
+            "$REDROID_IMAGE" \
+            androidboot.redroid_gpu_mode=guest \
+            androidboot.use_memfd=1 \
+            androidboot.redroid_width=720 androidboot.redroid_height=1280 androidboot.redroid_dpi=320
+          sleep 10
+          docker ps --filter name=redroid --format '{{.Status}}'
+          for i in $(seq 1 12); do
+            adb connect localhost:5555 && break
+            sleep 5
+          done
+          BC=""
+          for i in $(seq 1 90); do
+            docker ps --filter name=redroid --format '{{.Status}}' | grep -q Up || { echo "CONTAINER EXITED"; break; }
+            BC=$(adb -s localhost:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            [ "$BC" = "1" ] && break
+            sleep 5
+          done
+          if [ "$BC" != "1" ]; then
+            echo "BOOT TIMEOUT"
+            docker logs redroid 2>&1 | tail -40
+            exit 1
+          fi
+          adb -s localhost:5555 shell getprop ro.build.version.release
+          adb -s localhost:5555 shell getprop ro.product.cpu.abi
 
-      - name: Run AARE host lane
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 36
-          target: google_apis_playstore
-          arch: x86_64
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 3072
-          script: AARE_DIR=$HOME/aare bash ./ci/aare_test.sh
+      - name: Run AARE host lane against the redroid phone
+        run: AARE_DIR="$PWD" AARE_LAYOUT=dist bash ./ci/aare_test.sh
 
       - name: Scan artifact staging for secrets before upload
         if: always()
@@ -201,4 +271,3 @@ jobs:
           name: aare-host-artifacts
           path: artifacts/
           if-no-files-found: warn
-
