@@ -121,8 +121,13 @@ jobs:
 
       - name: Install SDK components
         run: |
+          # AARE needs compileSdk 37; the runner's bundled cmdline-tools may be
+          # too old to know it, so refresh cmdline-tools first, then install.
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SM" --install "cmdline-tools;latest" --sdk_root="$ANDROID_HOME" >/dev/null
           SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SM" --licenses >/dev/null || true
+          ls "$ANDROID_HOME/platforms" || true
           "$SM" "platforms;android-34" "platforms;android-37" "build-tools;34.0.0" "platform-tools" "emulator"
 
       - name: Clone AARE at pinned reviewed revision
