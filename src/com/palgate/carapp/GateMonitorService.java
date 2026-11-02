@@ -178,11 +178,33 @@ public class GateMonitorService extends Service {
     }
 
     private void startAsForeground() {
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIF_ID, buildNotification(),
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
-        } else {
-            startForeground(NOTIF_ID, buildNotification());
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(NOTIF_ID, buildNotification(),
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+            } else {
+                startForeground(NOTIF_ID, buildNotification());
+            }
+        } catch (SecurityException se) {
+            // Android 14+ (targetSdk 34): a LOCATION-typed FGS started while
+            // the app is not in an eligible state (e.g. the car session's
+            // convenience start while bound in the background) is rejected -
+            // and the uncaught throw kills the whole process, taking the car
+            // screen with it (observed in CI run 41499185198 logcat).
+            // Degrade instead: foreground WITHOUT the location type keeps the
+            // process and car session alive; GPS-dependent features stay off
+            // (requestLocations guards SecurityException already) until the
+            // monitor is started from the phone app in the foreground.
+            State.get().log("monitor: location-type foreground blocked from this state ("
+                    + se.getClass().getSimpleName() + ") - running without GPS; "
+                    + "start the monitor from the phone app for full function");
+            try {
+                startForeground(NOTIF_ID, buildNotification());
+            } catch (Exception e2) {
+                State.get().log("monitor: could not go foreground at all - stopping ("
+                        + e2.getClass().getSimpleName() + ")");
+                stopSelf();
+            }
         }
     }
 
