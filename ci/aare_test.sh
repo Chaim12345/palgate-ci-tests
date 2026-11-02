@@ -17,7 +17,7 @@ if [ "$AARE_LAYOUT" = "dist" ]; then
   AARE_HU="$AARE_DIR/headunit/aare-headunit/bin/aare-headunit"
 else
   AARE_APK="$AARE_DIR/app/build/outputs/apk/debug/app-debug.apk"
-  AARE_HU="$AARE_HU"
+  AARE_HU="$AARE_DIR/headunit/build/install/aare-headunit/bin/aare-headunit"
 fi
 
 echo "-- aare lane: install apks --"
@@ -62,6 +62,9 @@ printf '#!/bin/bash\nfor a in "$@"; do\n  if [ "$a" = "pipe:0" ]; then\n    tee 
 sudo chmod +x /usr/local/bin/ffmpeg
 echo "wrapper content:"; cat /usr/local/bin/ffmpeg
 echo "wrapper self-test:"; ffmpeg -version | head -1; echo "self-test exit: $?"
+# Artifact zips do not preserve Unix exec bits (broke the first ARM run with
+# "Permission denied"): restore it on the launcher.
+chmod +x "$AARE_HU" 2>/dev/null || true
 HU="$AARE_HU"
 timeout 240 "$HU" --serial "$ANDROID_SERIAL" --headless "$ART/aare" > "$ART/aare_hu.log" 2>&1 &
 HUPID=$!
