@@ -90,12 +90,15 @@ ls -la "$ART"/ffstdin.*.h264 2>/dev/null || echo "no ffstdin captures"
 ls -la "$ART/aare" 2>/dev/null | head
 
 adb logcat -d -s PalGate:I > "$ART/aare_palgate.log" 2>/dev/null || true
+# Phone-side evidence: AARE's own encoder/session logs (VideoEncoder logs its
+# codec choice and every rejected configure). Filtered, 40-hex masked below.
+adb logcat -d | grep -iE 'VideoEncoder|MediaCodec|prototux|encoder|decoder|avc|h264|ProjectionService|CarSession|VirtualDisplay|AAP' > "$ART/aare_phone.log" 2>/dev/null || true
 adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/aare_actuation.log" 2>/dev/null || true
 
 # The artifact secret scan patterns-match 40-hex blobs; third-party headunit
 # logs may contain session/cert material. Mask 40-hex in the untrusted-source
 # logs (evidence value preserved; everything else stays verbatim).
-sed -i -E 's/\b[0-9a-fA-F]{40}\b/[hex40]/g' "$ART/aare_hu.log" "$ART/aare_actuation.log" 2>/dev/null || true
+sed -i -E 's/\b[0-9a-fA-F]{40}\b/[hex40]/g' "$ART/aare_hu.log" "$ART/aare_actuation.log" "$ART/aare_phone.log" 2>/dev/null || true
 
 PNG=$(ls "$ART"/aare/*.png 2>/dev/null | head -1)
 if [ -n "$PNG" ] && [ ! -s "$ART/aare_actuation.log" ]; then
