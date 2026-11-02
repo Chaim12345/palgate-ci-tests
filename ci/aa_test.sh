@@ -110,7 +110,10 @@ echo "-- gate: targeted per-gate open dispatch (car-grid intent path) --"
 adb logcat -c || true
 adb shell am start-foreground-service -n com.palgate.carapp/.GateMonitorService -a com.palgate.carapp.OPEN_NOW --es gateId TEST000001 > "$ART/targeted_am.log" 2>&1 || true
 sleep 5
-adb logcat -d > "$ART/targeted_open.log" 2>/dev/null || true
+# Diagnostics-relevant lines only: unfiltered logcat carries random system
+# hashes (e.g. cert digests) that trip the artifact secret scan; everything a
+# failure analysis needs (PalGate, am/ActivityManager errors, crashes) is kept.
+adb logcat -d | grep -iE 'palgate|AndroidRuntime|ActivityManager|FATAL|System\.err|SecurityException' > "$ART/targeted_open.log" 2>/dev/null || true
 adb logcat -d | grep -iE 'connectGatt|BluetoothGatt|DELEGATED |writeCharacteristic|ACTION_3G_OPEN|ACTION_4GBT_OPEN|ACTION_BT_OPEN' > "$ART/targeted_actuation.log" 2>/dev/null || true
 if grep -q 'SYNTHETIC-DISPATCH manual open requested' "$ART/targeted_open.log" && ! grep -q 'OPEN-REFUSED' "$ART/targeted_open.log" && [ ! -s "$ART/targeted_actuation.log" ]; then
   note "targeted gateId open reached the test-build choke point (SYNTHETIC-DISPATCH), no refusal, zero actuation attempts"

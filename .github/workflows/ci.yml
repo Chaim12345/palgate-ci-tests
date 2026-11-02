@@ -128,7 +128,11 @@ jobs:
           SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SM" --licenses >/dev/null || true
           ls "$ANDROID_HOME/platforms" || true
-          "$SM" "platforms;android-34" "platforms;android-37" "build-tools;34.0.0" "platform-tools" "emulator"
+          # AARE pins no buildToolsVersion: install the newest available so
+          # AGP's default resolves, instead of guessing a revision per boot.
+          BT=$("$SM" --list | grep -oE 'build-tools;[0-9.]+' | sort -t';' -k2 -V | tail -1)
+          echo "newest build-tools: $BT"
+          "$SM" "platforms;android-34" "platforms;android-37" "$BT" "platform-tools" "emulator"
 
       - name: Clone AARE at pinned reviewed revision
         run: |
