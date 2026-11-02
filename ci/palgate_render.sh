@@ -152,6 +152,13 @@ else
   fi
 
   echo "-- safe OPEN tap: background-ineligible state must REFUSE explicitly, never dispatch --"
+  # B1 render may have scrolled the grid; scroll back (retrying, swipes are
+  # unreliable) until Gate A is in the current dump so the tap hits Gate A.
+  for k in 1 2 3 4 5 6; do
+    adb shell uiautomator dump /sdcard/ui_gate.xml >/dev/null 2>&1
+    adb shell cat /sdcard/ui_gate.xml 2>/dev/null | grep -q 'text="Test Gate A' && break
+    adb shell input swipe 600 260 600 520 300 >/dev/null 2>&1; sleep 2
+  done
   tap_text 'Test Gate A' /sdcard/ui_gate.xml || echo "(tap target missing - counted below)"
   sleep 12  # >10s: would catch ForegroundServiceDidNotStartInTimeException if stopSelf failed to cancel the FGS-start timeout
   adb logcat -d -s PalGate:I > "$ART/render_tap_palgate.log" 2>/dev/null || true
